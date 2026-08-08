@@ -1,0 +1,136 @@
+# Manner_Web 生产反向代理配置样例（Nginx）
+#
+# 部署形态：HTTPS 同源部署 —— Nginx 托管 SPA 静态资源（前端 dist），
+# /api 与 /uploads 反代到后端 127.0.0.1:8080（后端仅本机监听）。
+# 同源部署下 Cookie SameSite=Strict 正常工作，前端 connect-src 'self' 即可。
+#
+# 使用前提：
+#   1. 替换 <your-domain> 为实际域名；
+#   2. 证书路径替换为实际 SSL 证书；
+#   3. 后端以 COOKIE_SECURE=true 启动（HTTPS 下登录 Cookie 才带 Secure 标志）；
+#   4. 前端 build 产物放置于 /var/www/manner/dist（SvelteKit adapter-static 输出，
+#      以 index.html 作为 SPA 入口）。
+#
+# 放置于 /etc/nginx/conf.d/manner-web.conf 后执行:
+#   nginx -t && systemctl reload nginx
+
+server {
+    listen 80;
+    server_name <your-domain>;
+    # HTTP 全量跳转 HTTPS
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name <your-domain>;
+
+    # ---- TLS（证书路径占位，替换为实际证书）----
+    ssl_certificate     /etc/letsencrypt/live/<your-domain>/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/<your-domain>/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers off;
+
+    # ---- 统一安全响应头（后端 harden 中间件亦下发 nosniff/DENY/HSTS/Referrer-Policy，
+    #       此处保持一致并补充 CSP / Permissions-Policy；同名头值相同，重复下发无害）----
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "no-referrer" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+    # CSP：SPA 由 Nginx 托管。script-src 'self' 要求前端构建不内联脚本
+    # （Vite/SvelteKit 默认构建产物为外部 JS，满足要求；若改动构建为内联脚本需调整）。
+    # 头像/主题图片允许 data:/blob:；connect-src 'self' 覆盖同源 /api 请求。
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" always;
+
+    # 隐藏 Nginx 版本
+    server_tokens off;
+
+    # ---- 根路径：静态资源（前端 dist）----
+    root /var/www/manner/dist;
+    index index.html;
+
+    # ---- gzip 压缩（静态资源；/api 反代响应建议关闭，见下方说明）----
+    gzip on;
+    gzip_comp_level 5;
+    gzip_min_length 1024;
+    gzip_vary on;
+    gzip_types text/plain text/css application/javascript application/json
+               image/svg+xml font/woff2;
+
+    # ---- SPA 回退：所有路径回退到 index.html（SvelteKit 客户端路由接管）----
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # 入口 HTML 不缓存（保证发布后立即生效），带哈希的静态资源走下方长缓存。
+    # 注意：本层不使用 add_header（add_header 在同一层级出现会覆盖外层继承的
+    # 安全响应头），改用 expires 指令生成 Cache-Control，外层安全头正常继承。
+    location = /index.html {
+        expires -1;   # Cache-Control: no-cache（每次回源校验）
+    }
+
+    # ---- 静态资源长缓存（SvelteKit 构建产物带内容哈希，可安全长缓存）----
+    location ~* \.(?:js|mjs|css|png|jpg|jpeg|gif|webp|svg|ico|woff2?)$ {
+        expires 7d;   # Cache-Control: max-age=604800
+        access_log off;
+        try_files $uri =404;
+    }
+
+    # ---- 后端 API 反代（同源部署 → Cookie SameSite=Strict 正常工作）----
+    location /api/ {
+        # 不带尾斜杠的 proxy_pass：URI 原样透传（/api/xxx → 后端 /api/xxx）
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # 大文件上传（与后端 DefaultBodyLimit 100MB 对齐）
+        client_max_body_size 100m;
+        # 长轮询/大响应
+        proxy_read_timeout 60s;
+
+        # API 响应关闭 gzip：后端为 JSON 业务响应，压缩会引入压缩侧信道风险
+        # （BREACH 类攻击面），静态资源压缩收益更大且无此风险。
+        gzip off;
+    }
+
+    # ---- 上传文件静态访问（经后端 uploads_extension_guard：
+    #      图片内联、其余扩展名强制 Content-Disposition: attachment 下载）----
+    location /uploads/ {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $host;
+        proxy_http_version 1.1;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    # ---- 可选：来源 IP 登录限流兜底 ----
+    # 后端登录限流按 TCP 对端 IP 计数且不信任 X-Forwarded-For，经反代后 per-IP
+    # 维度弱化（对端恒为 127.0.0.1），建议在反代层按真实来源 IP 补充限流：
+    #
+    #   limit_req_zone $binary_remote_addr zone=login:10m rate=10r/m;
+    #   location ~ ^/api/auth/(login|precheck|first-login|register)$ {
+    #       limit_req zone=login burst=20 nodelay;
+    #       proxy_pass http://127.0.0.1:8080;
+    #   }
+    #
+    # 注意：上述 location 需放在 /api/ 规则之前匹配；启用后请删除上方 /api/ 块中的
+    # 对应路径或保持顺序正确，避免重复匹配。
+}
+
+# 说明：
+# - CSP 的 script-src 'self' 要求前端构建不内联脚本；若使用 Vite 默认构建（无内联），可保留。
+#   前端 dev server 已下发开发用 CSP（含 HMR 所需 ws:），本配置为生产收敛版本。
+# - 若同一 Nginx 还需托管多个站点，请复制本 server 块并为每个域名单独配置证书。
+# - 后端 .env 生产示例：
+#     SERVER_HOST=127.0.0.1
+#     SERVER_PORT=8080
+#     CORS_ALLOWED_ORIGINS=https://<your-domain>
+#     COOKIE_SECURE=true
+#     JWT_SECRET=<强随机密钥，≥32 字符>
+#     LOG_LEVEL=info
+#     PROFILE=production
+# - 详细安全说明与部署检查项见 docs/SECURITY.md、docs/安全评估报告.md。

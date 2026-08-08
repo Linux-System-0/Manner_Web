@@ -1,0 +1,116 @@
+# Manner_Web 安全设计说明（SECURITY）
+
+> 适用范围：部署与运维人员、开发与维护人员。
+> 事实依据：以代码为准（认证见 `backend/src/handlers/auth.rs` 与 `backend/src/middleware/auth.rs`；上传与静态目录见 `backend/src/handlers/system.rs`、`backend/src/handlers/chat.rs`、`backend/src/handlers/mod.rs`；响应头见 `backend/src/middleware/security.rs`）。密码学与令牌规范详见 `加密标准.md`，系统架构与部署详见 `架构设计.md`、`nginx-prod.conf.example`、`../README.md`。
+
+## 1. 概述
+
+Manner_Web 是面向企业内部的 Web 管理系统：员工管理 + 员工级直接授权 + 聊天（单聊/群聊、文本/文件消息、拉黑）+ 系统设置。前后端分离：Rust(axum) REST API + SvelteKit 5 纯 SPA（adapter-static 静态产物）。
+
+**部署形态**：Nginx HTTPS 同源部署——Nginx 托管 SPA 静态资源，`/api` 与 `/uploads` 反代到后端 `127.0.0.1:8080`（后端仅本机监听，不直接暴露公网）；模板见 `nginx-prod.conf.example`。
+
+## 2. 认证安全
+
+| 机制 | 说明 |
+| --- | --- |
+| JWT 双令牌 | access（默认 30 分钟，`typ=access`，内嵌权限快照）+ refresh（默认 7 天，`typ=refresh`，不携带权限，仅 `POST /api/auth/refresh` 可用）；`typ` 隔离防止 refresh 冒充 access |
+| Cookie 属性 | `manner_token` / `manner_refresh` 均 `HttpOnly; SameSite=Strict; Path=/`；`Secure` 由 `COOKIE_SECURE` 控制（生产必须 true）；JWT 不落 localStorage |
+| 登出黑名单 | access 与 refresh 的 jti 同时写入 `token_blacklist`，并下发 `Max-Age=0` 清除双 Cookie |
+| 改密/重置全端失效 | `pwd_version` 递增，所有已签发 access/refresh 立即失效；账号禁用（`status != 1`）同样立即失效 |
+| 首登强制改密 | 创建/重置密码生成随机初始密码（16 位字母数字，约 95 bit 熵）并置 `must_change_password=1`；三步登录：`precheck`（返回 `must_change`）→ `login` 或 `first-login`（校验初始密码 + 设置新密码 ≥8 位 + 自动签发会话） |
+| 登录节流 | `LoginThrottle` 按「真实 IP（TCP 对端）+ 用户名」双维度计数，默认 5 次/900 秒，超限 429 + `Retry-After`；作用于 login/precheck/first-login；参数可通过系统设置动态调整（变更后清空计数）；**不信任 `X-Forwarded-For`**（可伪造）；反代部署建议在 Nginx 补充 `limit_req`（见权衡） |
+| 账号枚举防护 | 启动生成与 `BCRYPT_COST` 同开销的假哈希 `login_dummy_hash`；「用户名不存在」分支执行等开销假校验；登录/预检/首登失败统一错误消息（40001「用户名或密码错误」），不区分账号不存在/禁用 |
+
+## 3. 授权安全
+
+- **员工级直接授权模型**：11 个权限码（employee 模块 6 个 / chat 模块 3 个 / system 模块 2 个），经 `employee_permissions` 表直接授予员工；**无角色表、无部门数据范围**。
+- **首个管理员**：匿名注册创建（`registration_open='1'` 且员工数=0，事务 `FOR UPDATE` 防并发），成功后自动授予全部权限并关闭注册；已有账号后注册一律 403。
+- **授权约束**（`PUT /api/employees/:id/permissions`，需 `employee:edit`）：
+  - 覆盖式写入（事务内 DELETE 全量重插）；
+  - **子集约束**：新权限必须是操作者自身权限的子集，阻断提权链；
+  - 不能修改自己的权限；
+  - `protect_block=1` 的保护账号禁止任何管理操作；
+  - 目标不存在返回 404。
+- **防拉黑保护**：`employees.protect_block` 标记（需 `chat:protect_block` 权限置位），**双向语义**——保护账号不可被拉黑（400「该用户受保护，无法拉黑」），且禁止删除/改资料（本人改头像除外）/重置密码/改权限。
+- **令牌内权限快照**：权限变更不立即撤销已签发令牌，依赖令牌过期（默认 30 分钟）后经 refresh 重新查库换发。
+
+## 4. 数据传输安全
+
+- 全站 HTTPS：生产由 Nginx 强制 80→443 跳转（`nginx-prod.conf.example`），后端只监听本机。
+- HSTS：后端统一下发 `Strict-Transport-Security: max-age=31536000; includeSubDomains`，Nginx 同值下发。
+- Cookie `Secure`：`COOKIE_SECURE=true`（生产必须）；非本机绑定且未开启时启动输出安全告警。
+- CORS 白名单：`CORS_ALLOWED_ORIGINS` 显式列出实际域名（生产为 `https://<your-domain>`）+ `allow_credentials(true)`；含 `*` 启动告警。
+- 密码在 TLS 通道内明文 POST（前端无预哈希），理由见 `加密标准.md`。
+
+## 5. 文件上传安全
+
+与 `加密标准.md` §5 一致：
+
+- 图片上传（`POST /api/upload`，仅登录）：png/jpg/jpeg/gif/webp/bmp/ico 白名单 + **魔数校验**（防伪装扩展名）；
+- 任意文件上传（`POST /api/upload/file`，需 `chat:upload`）：扩展名 ASCII 字母数字、非空、≤16 字符；图片类仍魔数校验；
+- 落盘一律 **UUID 重命名**（`{uuid}.{ext}`），原始文件名不落盘；
+- **聊天文件隔离**：存 `uploads/chat/` 子目录，静态访问一律 404，只能经 `GET /api/chat/file/:name` 下载——三重校验：文件名白名单 → 消息引用 → 会话成员；
+- `/uploads` 静态守卫：需登录（未登录 401）、扩展名白名单、软链接防护、引用校验（`employees.avatar` / `messages.file_url`）、非图片强制 `attachment`；
+- 文件消息必须携带 `file_url` 且以 `/uploads/` 开头、扩展名合法；
+- 大小限制：系统设置 `chat_upload_limit`（"禁止" / "无限制" / 数字+单位）+ `DefaultBodyLimit` 100MB 硬限制。
+
+## 6. 安全响应头
+
+| 头 | 值 |
+| --- | --- |
+| X-Content-Type-Options | nosniff |
+| X-Frame-Options | DENY |
+| Strict-Transport-Security | max-age=31536000; includeSubDomains |
+| Referrer-Policy | no-referrer |
+| x-permitted-cross-domain-policies | none |
+
+收敛机制：剥离所有 `Allow` 头（`StripAllowMakeService`）；422 / 文本 400 / 415 统一收敛为 40000 通用参数错误；未知路由统一 401；CORS 白名单 + 凭据。后端不输出 CSP/Server 头，由 Nginx（生产，`nginx-prod.conf.example` 含 CSP 与 Permissions-Policy）与 dev server（开发）负责。
+
+## 7. 配置安全
+
+| 变量 | 默认值 | 生产要求 |
+| --- | --- | --- |
+| DATABASE_URL | 必填，无默认 | MySQL 连接串，最小权限账号 |
+| JWT_SECRET | 无默认（内置默认值直接 panic 拒绝启动） | 强随机，≥32（建议 ≥64）字符；更换即全端失效 |
+| BCRYPT_COST | 12 | 保持默认 |
+| TOKEN_EXPIRE_MINUTES | 30 | 可调 |
+| REFRESH_TOKEN_EXPIRE_DAYS | 7 | 可调 |
+| COOKIE_SECURE | false | **生产必须 true** |
+| SERVER_HOST | 127.0.0.1 | 生产保持 127.0.0.1；绑定 0.0.0.0 告警 |
+| SERVER_PORT | 8080 | 生产 8080 仅本机/内网可达（对外只经 Nginx） |
+| CORS_ALLOWED_ORIGINS | localhost:5173,127.0.0.1:5173 | 生产填实际域名；含 `*` 告警 |
+| LOGIN_MAX_FAILURES | 5 | 可经系统设置调整 |
+| LOGIN_LOCK_WINDOW_SECS | 900 | 可经系统设置调整 |
+| LOG_LEVEL | debug | 生产建议 info |
+| PROFILE | — | 生产设置 production（JSON 滚动日志） |
+
+**security_warnings**：启动时输出配置告警（`JWT_SECRET` 为默认值或过短、`SERVER_HOST=0.0.0.0`、CORS 含 `*`、`COOKIE_SECURE` 未开启且非本机绑定），部署后应检查启动日志无告警再对外暴露。
+
+## 8. 生产部署安全 Checklist
+
+- [ ] 生成强随机 `JWT_SECRET`（如 `openssl rand -hex 32`），不使用默认值
+- [ ] `COOKIE_SECURE=true`
+- [ ] 全站 HTTPS/TLS（证书 + 80→443 跳转，`ssl_protocols TLSv1.2 TLSv1.3`）
+- [ ] `SERVER_HOST=127.0.0.1`，8080 仅本机/内网可达
+- [ ] `CORS_ALLOWED_ORIGINS` 为实际域名，不含 `*`
+- [ ] 使用 `nginx-prod.conf.example` 模板（SPA 回退、/api 与 /uploads 反代、安全响应头、`server_tokens off`、`client_max_body_size 100m`）
+- [ ] 数据库使用最小权限账号（非 root）
+- [ ] `uploads/` 与 `logs/` 目录权限收紧（仅后端进程可写）
+- [ ] 检查启动日志 `security_warnings` 无告警
+- [ ] 定期备份数据库（员工、权限、黑名单数据）
+- [ ] `LOG_LEVEL=info` + `PROFILE=production`（JSON 滚动日志）
+- [ ] 前端构建产物由 Nginx 托管，Node/npm 仅构建期需要，不上部署机
+
+## 9. 已知安全设计权衡
+
+| 权衡 | 说明 |
+| --- | --- |
+| /uploads 需登录 vs 图片加载 | 静态目录要求登录，但 `<img>` 同源加载会自动携带 Cookie（头像等场景不受影响）；未登录一律 401 |
+| 登录限流为进程内内存态 | 计数不跨实例共享（多实例部署需各自限流）；反代部署时 IP 维度退化为反代地址（真实 IP 取自 TCP 对端、不信任 XFF）；建议反代补充 `limit_req` |
+| token_blacklist 增长 | 登出/轮换的 jti 按过期时间入库，表会持续增长，需定期清理过期记录（`expires_at` 可作清理依据） |
+| API 层无 CSP | CSP 由前端 dev server 与生产 Nginx 下发（`nginx-prod.conf.example`）；生产应确保 8080 仅本机/内网监听，避免绕过反代直连后端 |
+| 迁移非版本化 | 启动时按 `;` 分割执行 `init.sql`，语句失败仅告警不中断；ALTER 类语句非幂等，需人工确认启动日志 |
+| 密码策略 | 新密码最小 8 位，未强制复杂度；首登改密由 `must_change_password` 保证流程 |
+| SameSite=Strict | CSRF 防护依赖「同站」语义（同站 = 相同站点，含子域）；跨站 iframe 嵌入不受支持（另有 `X-Frame-Options: DENY` 兜底） |
+
+> 相关文档：密码学与令牌规范见 `加密标准.md`；系统架构与部署见 `架构设计.md`、`nginx-prod.conf.example`、`../README.md`。
