@@ -105,7 +105,7 @@
                 return false
               }}
             >
-              <Button loading={uploading}>
+              <Button loading={uploading} tooltip="上传新头像图片">
                 <Icon name="upload" style="font-size:14px" />更换头像
               </Button>
             </Upload>
@@ -193,7 +193,7 @@
           </FormItem>
 
           <FormItem label="">
-            <Button type="primary" htmlType="submit" loading={submitting}>修改密码</Button>
+            <Button type="primary" htmlType="submit" loading={submitting} tooltip="验证旧密码后修改登录密码">修改密码</Button>
           </FormItem>
         </Form>
       </Card>

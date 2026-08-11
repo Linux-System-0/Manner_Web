@@ -4,9 +4,10 @@
   // - 注册引导：GET /system/login-page，registration_open=true 时进入注册模式
   // - 主题：login_theme（system/light/dark）→ html[data-theme]；system 模式跟随系统
   // - 已登录访问 /login 时自动跳转首页
+  import { onMount } from 'svelte'
   import { goto } from '$app/navigation'
   import { authStore } from '$lib/stores/auth'
-  import { getEffectiveTheme } from '$lib/stores/preferences'
+  import { getEffectiveTheme, preferencesStore } from '$lib/stores/preferences'
   import {
     login as loginApi,
     register as registerApi,
@@ -15,6 +16,7 @@
   } from '$lib/api/auth'
   import { getLoginPage } from '$lib/api/system'
   import { getApiError } from '$lib/api/client'
+  import { setFavicon } from '$lib/utils/favicon'
   import type { LoginPageInfo } from '$lib/types'
   import { message } from '$lib/components/message'
   import Card from '$lib/components/Card.svelte'
@@ -66,6 +68,18 @@
   let setupAttempted = $state(false)
   let registerAttempted = $state(false)
 
+  // 被「已在其他设备登录」踢下线后回到登录页的提示
+  onMount(() => {
+    try {
+      if (sessionStorage.getItem('manner-logout-reason') === 'kicked') {
+        sessionStorage.removeItem('manner-logout-reason')
+        message.warning('该用户已在其他设备登录，请重新登录')
+      }
+    } catch {
+      /* ignore */
+    }
+  })
+
   // 已登录访问 /login → 回首页（replace 避免历史栈污染）
   $effect(() => {
     if ($authStore.isAuthenticated) {
@@ -101,6 +115,7 @@
           siteTitle = loginTitle
           document.title = loginTitle
         }
+        setFavicon(data.login_site_icon ? `/api/system/icon/login?v=${Date.now()}` : null)
         if (typeof data.registration_open === 'boolean') {
           // 无任何账号时自动进入注册引导；已有账号则直接显示登录
           mode = data.registration_open ? 'register' : 'login'
@@ -283,6 +298,8 @@
     try {
       const res = await loginApi(username, passwordValue)
       authStore.setAuth(res.data.user)
+      // 个人设置按用户存于服务端：登录成功后重新拉取该用户的偏好（而非沿用本机 localStorage）
+      await preferencesStore.refresh()
       // 兜底：若预检未命中但登录返回待改密标记，仍引导改密
       if (res.data.user.must_change_password) {
         message.warning('首次登录请尽快修改密码')
@@ -315,6 +332,8 @@
         new_password: newPassword,
       })
       authStore.setAuth(res.data.user)
+      // 个人设置按用户存于服务端：登录成功后重新拉取该用户的偏好
+      await preferencesStore.refresh()
       message.success('密码设置成功，已自动登录')
       goto('/', { replaceState: true })
     } catch (err: unknown) {
@@ -393,7 +412,7 @@
             />
           </FormItem>
           <FormItem>
-            <Button type="primary" htmlType="submit" block loading={loading} size="large">
+            <Button type="primary" htmlType="submit" block loading={loading} size="large" tooltip="校验用户名后进入密码登录">
               下一步
             </Button>
           </FormItem>
@@ -411,12 +430,12 @@
             />
           </FormItem>
           <FormItem>
-            <Button type="primary" htmlType="submit" block loading={loading} size="large">
+            <Button type="primary" htmlType="submit" block loading={loading} size="large" tooltip="提交用户名和密码登录系统">
               登 录
             </Button>
           </FormItem>
           <div style="text-align:center">
-            <Button type="link" size="small" onClick={backToUsername}>返回修改用户名</Button>
+            <Button type="link" size="small" tooltip="返回上一步重新修改用户名" onClick={backToUsername}>返回修改用户名</Button>
           </div>
         </Form>
       {:else}
@@ -452,12 +471,12 @@
             />
           </FormItem>
           <FormItem>
-            <Button type="primary" htmlType="submit" block loading={loading} size="large">
+            <Button type="primary" htmlType="submit" block loading={loading} size="large" tooltip="设置新密码并完成登录">
               设置密码并登录
             </Button>
           </FormItem>
           <div style="text-align:center">
-            <Button type="link" size="small" onClick={backToUsername}>返回修改用户名</Button>
+            <Button type="link" size="small" tooltip="返回上一步重新修改用户名" onClick={backToUsername}>返回修改用户名</Button>
           </div>
         </Form>
       {/if}
@@ -511,7 +530,7 @@
           />
         </FormItem>
         <FormItem>
-          <Button type="primary" htmlType="submit" block loading={loading} size="large">
+          <Button type="primary" htmlType="submit" block loading={loading} size="large" tooltip="注册新账号">
             注册
           </Button>
         </FormItem>

@@ -14,6 +14,11 @@ pub struct Claims {
     pub permissions: Vec<String>,
     pub exp: usize,
     pub jti: String,
+    /// 会话 id（单设备登录）：同一账号在别处登录会更新 employees.active_session，
+    /// 服务端校验 claims.sid == active_session，不一致即拒绝（旧设备被踢下线）。
+    /// 旧 token 无此字段时 serde default 为空字符串。
+    #[serde(default)]
+    pub sid: String,
     /// F-08: token 版本号。改密/重置密码后递增，服务端校验与 employees.pwd_version 不一致即拒绝，
     /// 使旧 token 在改密后立即失效（旧 token 无此字段时 serde default 为 0）。
     #[serde(default)]
@@ -30,6 +35,7 @@ pub fn create_token(
     name: &str,
     permissions: &[String],
     pwd_version: i64,
+    session_id: &str,
     secret: &str,
     expire_minutes: i64,
 ) -> Result<String, AppError> {
@@ -44,6 +50,7 @@ pub fn create_token(
         permissions: permissions.to_vec(),
         exp,
         jti,
+        sid: session_id.to_string(),
         pwd_version,
         typ: "access".to_string(),
     };
@@ -68,6 +75,7 @@ pub fn create_refresh_token(
     username: &str,
     name: &str,
     pwd_version: i64,
+    session_id: &str,
     secret: &str,
     expire_days: i64,
 ) -> Result<String, AppError> {
@@ -82,6 +90,7 @@ pub fn create_refresh_token(
         permissions: Vec::new(),
         exp,
         jti,
+        sid: session_id.to_string(),
         pwd_version,
         typ: "refresh".to_string(),
     };

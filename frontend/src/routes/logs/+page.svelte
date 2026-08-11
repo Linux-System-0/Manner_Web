@@ -159,7 +159,7 @@
 {#if !allowed}
   <Result status="403" title="403" subTitle="抱歉，您没有访问此页面的权限。">
     {#snippet extra()}
-      <Button type="primary" onClick={() => window.history.back()}>返回</Button>
+      <Button type="primary" tooltip="返回上一页" onClick={() => window.history.back()}>返回</Button>
     {/snippet}
   </Result>
 {:else}
@@ -229,8 +229,8 @@
             onInput={(v) => (keyword = v)}
             style="width:180px"
           />
-          <Button size="small" onClick={handleExport}>导出</Button>
-          <Button size="small" onClick={fetchLogs} loading={loading}>
+          <Button size="small" tooltip="导出当前筛选的日志数据" onClick={handleExport}>导出</Button>
+          <Button size="small" tooltip="重新加载日志数据" onClick={fetchLogs} loading={loading}>
             {#snippet icon()}<Icon name="reload" />{/snippet}
             刷新
           </Button>

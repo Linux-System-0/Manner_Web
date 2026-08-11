@@ -108,8 +108,11 @@ server {
     }
 
     # ---- 可选：来源 IP 登录限流兜底 ----
-    # 后端登录限流按 TCP 对端 IP 计数且不信任 X-Forwarded-For，经反代后 per-IP
-    # 维度弱化（对端恒为 127.0.0.1），建议在反代层按真实来源 IP 补充限流：
+    # 后端登录限流键基于「真实客户端 IP」。经反代部署时必须将代理地址加入后端
+    # TRUSTED_PROXIES（例如 TRUSTED_PROXIES=127.0.0.1），后端才会信任本模板下发的
+    # X-Real-IP（$remote_addr）解析真实来源 IP；否则对端恒为 127.0.0.1 会造成
+    # 登录失败计数全站共享，5 次失败即可能锁死全站登录（DoS 放大）。
+    # 亦可在此补充反代层限流：
     #
     #   limit_req_zone $binary_remote_addr zone=login:10m rate=10r/m;
     #   location ~ ^/api/auth/(login|precheck|first-login|register)$ {
@@ -131,6 +134,7 @@ server {
 #     CORS_ALLOWED_ORIGINS=https://<your-domain>
 #     COOKIE_SECURE=true
 #     JWT_SECRET=<强随机密钥，≥32 字符>
+#     TRUSTED_PROXIES=127.0.0.1
 #     LOG_LEVEL=info
 #     PROFILE=production
-# - 详细安全说明与部署检查项见 docs/SECURITY.md、docs/安全评估报告.md。
+# - 详细安全说明与部署检查项见 docs/安全设计说明.md、docs/加密标准.md。

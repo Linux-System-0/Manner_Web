@@ -1,6 +1,7 @@
 <script lang="ts">
   // Menu：导航菜单（dark inline 风格，侧边栏用）
   import { Icon } from '$lib/icons'
+  import Tooltip from './Tooltip.svelte'
 
   export interface MenuItem {
     key: string
@@ -15,35 +16,43 @@
     theme = 'dark',
     onClick,
     style = '',
+    collapsed = false,
   }: {
     items?: MenuItem[]
     selectedKeys?: string[]
     theme?: 'dark' | 'light'
     onClick?: (key: string) => void
     style?: string
+    collapsed?: boolean
   } = $props()
 </script>
 
-<ul class="ant-menu ant-menu-root ant-menu-inline ant-menu-{theme}" style="{style}">
+<ul class="ant-menu ant-menu-root ant-menu-inline ant-menu-{theme}" class:ant-menu-collapsed={collapsed} style="{style}">
   {#each items as item (item.key)}
-    <li
-      class="ant-menu-item"
-      class:ant-menu-item-selected={selectedKeys.includes(item.key)}
-      class:ant-menu-item-danger={item.danger}
-      role="menuitem"
-      title={item.label}
-      tabindex={selectedKeys.includes(item.key) ? 0 : -1}
-      onclick={() => onClick?.(item.key)}
-      onkeydown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault()
-          onClick?.(item.key)
-        }
-      }}
-    >
-      {#if item.icon}<span class="anticon" style="font-size:16px;margin-right:10px;display:inline-flex"><Icon name={item.icon} /></span>{/if}
-      <span class="ant-menu-title-content">{item.label}</span>
-    </li>
+    {#snippet itemContent()}
+      <li
+        class="ant-menu-item"
+        class:ant-menu-item-selected={selectedKeys.includes(item.key)}
+        class:ant-menu-item-danger={item.danger}
+        role="menuitem"
+        tabindex={selectedKeys.includes(item.key) ? 0 : -1}
+        onclick={() => onClick?.(item.key)}
+        onkeydown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            onClick?.(item.key)
+          }
+        }}
+      >
+        {#if item.icon}<span class="anticon" style="font-size:16px;margin-right:{collapsed ? 0 : 10}px;display:inline-flex"><Icon name={item.icon} /></span>{/if}
+        {#if !collapsed}<span class="ant-menu-title-content">{item.label}</span>{/if}
+      </li>
+    {/snippet}
+    {#if collapsed}
+      <Tooltip title={item.label} position="right" wrapperStyle="display:block">{@render itemContent()}</Tooltip>
+    {:else}
+      {@render itemContent()}
+    {/if}
   {/each}
 </ul>
 
@@ -75,6 +84,13 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
+  .ant-menu-collapsed .ant-menu-item {
+    padding: 0;
+    justify-content: center;
+  }
+  .ant-menu-collapsed .ant-menu-item .anticon {
+    margin-right: 0;
+  }
   .ant-menu-dark .ant-menu-item {
     color: var(--ant-menu-dark-item-color);
   }
@@ -93,7 +109,20 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
+  .ant-menu-light {
+    background: transparent;
+    color: var(--ant-color-text);
+  }
+  .ant-menu-light .ant-menu-item {
+    color: var(--ant-color-text);
+  }
   .ant-menu-light .ant-menu-item:hover {
     background: var(--ant-color-fill-secondary);
+    color: var(--ant-color-text);
+  }
+  .ant-menu-light .ant-menu-item-selected {
+    background: var(--ant-menu-light-item-selected-bg);
+    color: var(--ant-color-primary);
+    font-weight: 600;
   }
 </style>

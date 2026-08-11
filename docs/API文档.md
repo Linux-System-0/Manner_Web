@@ -40,7 +40,7 @@
 | 40002 | 401 | Token 无效或已过期 |
 | 40003 | 401 | Token 已被注销（命中黑名单） |
 | 40004 | 403 | 无权限访问 |
-| 40005 | 400 | 校验失败（如密码不足 8 位、设置格式非法） |
+| 40005 | 400 | 校验失败（如密码长度不合规 8~72 字节、设置格式非法） |
 | 40006 | 404 | 资源不存在 |
 | 40007 | 409 | 用户名已存在 |
 | 40008 | 400 | 旧密码错误 |
@@ -53,11 +53,13 @@
 - Cookie 会话（推荐，浏览器默认行为）：
   - `manner_token`：access 令牌。
   - `manner_refresh`：refresh 令牌。
-  - 属性：`HttpOnly; SameSite=Strict; Path=/; Max-Age=...`；配置 `COOKIE_SECURE=true`（生产必须）时追加 `Secure`。
-  - 登出时后端清除两个 Cookie。
+  - `manner_csrf`：CSRF 双提交令牌（**非 HttpOnly**，前端 JS 读取后经 `X-CSRF-Token` 头随写请求回传）。
+  - 属性：`SameSite=Strict; Path=/; Max-Age=...`（`manner_token`/`manner_refresh` 另带 `HttpOnly`）；配置 `COOKIE_SECURE=true`（生产必须）时追加 `Secure`。
+  - 登出时后端清除三个 Cookie。
 - 兼容 `Authorization: Bearer <token>` 头方式（access 令牌），非浏览器客户端可用。
 - `refresh` 令牌**只允许**用于 `POST /api/auth/refresh`；将其冒充 access 令牌访问其他接口一律拒绝（`typ` 校验）。
 - 令牌校验链：验签 → `typ` 必须为 `access` → `jti` 不在 `token_blacklist` → 员工存在且 `pwd_version` 与库一致且 `status = 1`。
+- **CSRF**：经 Cookie 认证的浏览器会话，对写方法（POST/PUT/DELETE/PATCH）要求 `X-CSRF-Token` 头与 `manner_csrf` Cookie 一致，否则 `403`；`Authorization: Bearer` 认证不受 CSRF 约束。
 - 401 自动续期流程（前端 `client.ts` 行为）：收到 401 时并发去重，用 `manner_refresh` 调 `/api/auth/refresh` 换新会话后重放原请求；刷新失败则登出并跳转登录页。
 
 ### 1.5 Content-Type 与请求体约定
@@ -70,7 +72,7 @@
 ### 1.6 CORS
 
 - 白名单来源：`CORS_ALLOWED_ORIGINS`（默认 `http://localhost:5173,http://127.0.0.1:5173`，逗号分隔；生产应配置为正式域名）。
-- 允许方法：GET / POST / PUT / DELETE / OPTIONS；允许头：Content-Type / Accept / Authorization；`allow_credentials(true)`（配合 Cookie 会话）。
+- 允许方法：GET / POST / PUT / DELETE / OPTIONS；允许头：Content-Type / Accept / Authorization / X-CSRF-Token；`allow_credentials(true)`（配合 Cookie 会话）。
 - 配置含 `*` 时启动输出安全告警。
 
 ### 1.7 通用错误场景
@@ -98,15 +100,15 @@
 | employee | employee:edit | 编辑员工 | PUT /api/employees/:id、PUT /api/employees/:id/permissions |
 | employee | employee:delete | 删除员工 | DELETE /api/employees/:id |
 | employee | employee:password | 重置员工密码 | PUT /api/employees/:id/password |
-| chat | chat:protect_block | 防拉黑保护 | PUT /api/employees/:id/protect-block |
+| chat | chat:protect_block | 防拉黑保护 | 权限矩阵勾选即置位（PUT /api/employees/:id/permissions 联动） |
 | chat | chat:upload | 上传文件 | POST /api/upload/file |
-| chat | chat:group_create | 群聊创建 | 种子保留码，当前无端点校验 |
+| chat | chat:group_create | 群聊创建 | POST /api/chat/conversations（创建群聊） |
 | system | system:settings | 系统设置 | GET /api/system/health、GET/PUT /api/system/settings、GET /api/system/logs |
 | system | system:config | 系统配置 | 种子保留码，当前无端点校验 |
 
 说明：
 
-- `chat:group_create` 与 `system:config` 为种子预留码，当前**没有端点校验**它们，保留以备后续功能。
+- `system:config` 为种子预留码，当前**没有端点校验**，保留以备后续功能。
 - 首个管理员：系统初始时（`registration_open=1` 且员工表为空）经 `POST /api/auth/register` 注册，注册成功即被授予**全部权限码**，并关闭注册通道（`registration_open` 置 `0`）。
 
 ---
@@ -148,19 +150,19 @@
 | 24 | GET | /api/system/logs | system:settings | system::logs |
 | 25 | PUT | /api/system/settings | system:settings | system::update_settings |
 | 26 | GET | /api/chat/conversations | 登录 | chat::list_conversations |
-| 27 | GET | /api/chat/conversations/:id/messages | 登录 + 会话成员 | chat::get_messages |
-| 28 | POST | /api/chat/conversations/:id/messages | 登录 + 会话成员 | chat::send_message |
-| 29 | PUT | /api/chat/conversations/:id/name | 登录 + 群管理员 | chat::update_group_name |
-| 30 | POST | /api/chat/conversations/:id/participants | 登录 + 群管理员 | chat::add_participant |
-| 31 | PUT | /api/chat/conversations/:id/participants/:target_id | 登录（群：管理员可操作他人/本人；单聊：仅本人） | chat::update_participant |
-| 32 | DELETE | /api/chat/conversations/:id/participants/:target_id | 登录 + 群管理员 | chat::remove_participant |
-| 33 | DELETE | /api/chat/conversations/:id/disband | 登录 + 群管理员 | chat::disband_group |
-| 34 | POST | /api/chat/block | 登录 | chat::block_user |
-| 35 | DELETE | /api/chat/block/:id | 登录 | chat::unblock_user |
-| 36 | GET | /api/chat/blocked | 登录 | chat::list_blocked |
-| 37 | GET | /api/chat/employees | 登录 | chat::list_employees_for_chat |
-| 38 | GET | /api/chat/file/:name | 登录 + 相关会话成员 | chat::get_chat_file |
-| 39 | PUT | /api/employees/:id/protect-block | chat:protect_block | chat::update_protect_block |
+| 27 | POST | /api/chat/conversations | chat:group_create | chat::create_group_conversation |
+| 28 | GET | /api/chat/conversations/:id/messages | 登录 + 会话成员 | chat::get_messages |
+| 29 | POST | /api/chat/conversations/:id/messages | 登录 + 会话成员 | chat::send_message |
+| 30 | PUT | /api/chat/conversations/:id/name | 登录 + 群管理员 | chat::update_group_name |
+| 31 | POST | /api/chat/conversations/:id/participants | 登录 + 群管理员 | chat::add_participant |
+| 32 | PUT | /api/chat/conversations/:id/participants/:target_id | 登录（群：管理员可操作他人/本人；单聊：仅本人） | chat::update_participant |
+| 33 | DELETE | /api/chat/conversations/:id/participants/:target_id | 登录 + 群管理员 | chat::remove_participant |
+| 34 | DELETE | /api/chat/conversations/:id/disband | 登录 + 群管理员 | chat::disband_group |
+| 35 | POST | /api/chat/block | 登录 | chat::block_user |
+| 36 | DELETE | /api/chat/block/:id | 登录 | chat::unblock_user |
+| 37 | GET | /api/chat/blocked | 登录 | chat::list_blocked |
+| 38 | GET | /api/chat/employees | 登录 | chat::list_employees_for_chat |
+| 39 | GET | /api/chat/file/:name | 登录 + 相关会话成员 | chat::get_chat_file |
 
 ### 静态资源
 
@@ -198,7 +200,7 @@
 | user.avatar | 头像 URL（可能为 null） |
 | user.must_change_password | 是否处于首登强制改密状态 |
 
-同时 `Set-Cookie`：`manner_token`、`manner_refresh`。
+同时 `Set-Cookie`：`manner_token`、`manner_refresh`、`manner_csrf`。
 
 错误场景：`40001`（用户名或密码错误，含账号禁用时统一返回，不区分）、`40009`（节流，429 + Retry-After）。
 
@@ -213,7 +215,7 @@
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | username | string | 是 | 用户名 |
-| password | string | 是 | 密码（至少 8 位） |
+| password | string | 是 | 密码（8~72 字节） |
 | name | string | 是 | 姓名 |
 | email | string | 否 | 邮箱 |
 
@@ -225,7 +227,7 @@
 - 成功后自动授予**全部权限码**，并将 `registration_open` 置 `0`。
 - 已有账号后调用一律 `403`（`40004`）。
 
-错误场景：`40004`（注册通道已关闭）、`40007`（用户名已存在）、`40005`（密码不足 8 位）。
+错误场景：`40004`（注册通道已关闭）、`40007`（用户名已存在）、`40005`（密码长度不合规，8~72 字节）。
 
 #### POST /api/auth/precheck
 
@@ -257,16 +259,16 @@
 | --- | --- | --- | --- |
 | username | string | 是 | 用户名 |
 | initial_password | string | 是 | 当前生效的初始密码（创建员工/重置密码时下发） |
-| new_password | string | 是 | 新密码（至少 8 位） |
+| new_password | string | 是 | 新密码（8~72 字节） |
 
-成功响应 `data`：与登录一致（LoginResponse + 双 Cookie）。
+成功响应 `data`：与登录一致（LoginResponse + 三个 Cookie）。
 
 特殊行为：
 
 - 仅 `must_change_password = 1` 的账号可走此流程，否则统一 `40001`。
 - 改密成功后 `pwd_version` 递增（此前签发的令牌全部失效）、`must_change_password` 置 0。
 
-错误场景：`40001`（账号不存在/非待激活/禁用/初始密码错误，统一不区分）、`40005`（密码不足 8 位）、`40009`。
+错误场景：`40001`（账号不存在/非待激活/禁用/初始密码错误，统一不区分）、`40005`（密码长度不合规，8~72 字节）、`40009`。
 
 #### POST /api/auth/refresh
 
@@ -274,7 +276,7 @@
 
 - 令牌来源：Cookie `manner_refresh` 或 `Authorization: Bearer`（与 access 令牌双通道读取一致）。
 - 校验：签名 → `typ` 必须为 `refresh` → 不在黑名单 → 员工存在、启用且 `pwd_version` 一致。
-- 成功后**轮换**：旧 refresh 的 `jti` 立即入黑名单，返回新的 LoginResponse 并覆盖两个 Cookie。
+- 成功后**轮换**：旧 refresh 的 `jti` 立即入黑名单，返回新的 LoginResponse 并覆盖三个 Cookie。
 
 错误场景：`40002`（令牌无效/过期）、`40003`（已被注销或轮换）。
 
@@ -283,7 +285,7 @@
 登录。登出并使会话失效。
 
 - 无请求体。当前 access 令牌的 `jti` 与 refresh 令牌的 `jti`（若有效）同时入 `token_blacklist`。
-- 响应清除两个 Cookie（`Max-Age=0`）。
+- 响应清除三个 Cookie（`Max-Age=0`）。
 
 错误场景：`40002`（令牌无效/过期）、`40003`。
 
@@ -296,11 +298,11 @@
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | old_password | string | 是 | 旧密码 |
-| new_password | string | 是 | 新密码（至少 8 位） |
+| new_password | string | 是 | 新密码（8~72 字节） |
 
 特殊行为：成功后 `pwd_version` 递增——**所有已登录会话全部失效**（含本会话，前端将收到 401 引导重新登录），并清除首登改密标记。
 
-错误场景：`40008`（旧密码错误）、`40005`（密码不足 8 位）、`40002`。
+错误场景：`40008`（旧密码错误）、`40005`（密码长度不合规，8~72 字节）、`40002`。
 
 #### GET /api/auth/me
 
@@ -403,14 +405,13 @@
 | --- | --- | --- |
 | name | string | 姓名 |
 | title / email / phone / id_number / address | string/null | 可清空 |
-| avatar | string/null | 头像 URL |
+| avatar | string/null | 头像 URL（仅接受本站上传图片 `/uploads/<uuid>.<图片扩展名>`，其余格式 → `40000`「头像必须是本站上传的图片」） |
 | hire_date | date/null | 可清空 |
 | status | int | 1 启用 / 非 1 禁用 |
 
 特殊行为：
 
 - **不能修改自己的资料**（仅 avatar 例外），否则 `40000`「员工管理不能更改自己的资料」。
-- `protect_block = 1` 的**保护账号**禁止更新，`40000`「该账号受保护，禁止该操作」（本人改自己的 avatar 不受此限）。
 - 无任何字段 → 直接成功。
 
 错误场景：`40000`、`40006`（不存在）、`40004`。
@@ -419,7 +420,7 @@
 
 权限：employee:delete。删除员工。
 
-特殊行为：不能删除自己（`40000`「不能删除自己」）；保护账号禁止删除（`40000`「该账号受保护，禁止该操作」）；删除后其 `employee_permissions` 记录随外键 CASCADE 清除。
+特殊行为：不能删除自己（`40000`「不能删除自己」）；删除后其 `employee_permissions` 记录随外键 CASCADE 清除。
 
 错误场景：`40000`、`40006`、`40004`。
 
@@ -431,9 +432,9 @@
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| new_password | string | 是 | 管理员为其设置的新密码 |
+| new_password | string | 是 | 管理员为其设置的新密码（8~72 字节） |
 
-特殊行为：不能重置自己（`40000`「不能重置自己的密码，请在个人资料中修改」）；保护账号禁止；成功后 `pwd_version` 递增（该员工所有会话被踢出）且 `must_change_password = 1`（下次登录强制改密）。响应 `message` 为「密码已重置」。
+特殊行为：不能重置自己（`40000`「不能重置自己的密码，请在个人资料中修改」）；成功后 `pwd_version` 递增（该员工所有会话被踢出）且 `must_change_password = 1`（下次登录强制改密）。响应 `message` 为「密码已重置」。
 
 错误场景：`40000`、`40006`、`40004`。
 
@@ -450,7 +451,6 @@
 特殊行为：
 
 - 不能修改自己的权限（`40000`「不能修改自己的权限」）。
-- 保护账号禁止。
 - **新权限必须是操作者自身权限的子集**，否则 `40004`（防受限管理员提权）。
 - 事务内先 DELETE 全量删除再逐条重插；响应「权限已更新」。
 
@@ -473,6 +473,26 @@
 | my_nickname / my_group_note | 我的昵称 / 我为对方设置的备注 |
 
 排序：`last_time DESC, created_at DESC`。
+
+#### POST /api/chat/conversations
+
+登录 + 持有 `chat:group_create` 权限。创建群聊，创建者自动成为群管理员（`role=admin`）。
+
+请求体：
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| name | string | 群名（trim 后非空，≤128 字符） |
+| member_ids | string[] | 初始成员 ID 列表（自动去重并剔除创建者自己，≤100 人） |
+
+特殊行为与错误场景：
+
+- 无 `chat:group_create` 权限 → `40004`。
+- 群名为空 → `40000`「群名不能为空」；超过 128 字符 → `40000`「群名不能超过 128 个字符」。
+- 成员数超过 100 → `40000`「群聊成员数量不能超过 100 人」。
+- 存在无效成员 ID → `40000`「包含无效成员」。
+
+成功响应 `data`：`ConversationResponse`（`my_role` 为 `admin`，`last_message`/`last_time` 为 null）。
 
 #### GET /api/chat/conversations/:id/messages
 
@@ -498,8 +518,8 @@
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| content | string | 文本内容 |
-| msg_type | string | 默认 text；file 为文件消息 |
+| content | string | 文本内容（≤20000 字符） |
+| msg_type | string | 默认 text；`text` / `file` 二选一，其他取值 → `40000`「不支持的消息类型」 |
 | file_url | string | 文件消息必须携带 |
 | file_name | string | 原始文件名（≤256 字符） |
 
@@ -509,7 +529,8 @@
 - 单聊：对方拉黑我 → `40000`「对方已拉黑你」。
 - 文件消息必须携带 `file_url` → `40000`「文件消息必须携带文件链接」。
 - `file_url` 必须以 `/uploads/` 开头且扩展名合法 → `40000`「文件链接必须指向本站上传的文件」（防任意链接传播）。
-- `file_name` 超 256 字符 → `40000`「文件名过长」。
+- **文件归属校验**：`file_url` 已被其他会话引用时，发送者必须是相关会话的成员 → 否则 `403`；未被引用的新上传文件必须真实存在于上传目录 → 否则 `40000`「文件不存在，请重新上传」（防跨会话引用他人文件/引用伪造路径）。
+- `file_name` 超 256 字符 → `40000`「文件名过长」；`content` 超 20000 字符 → `40000`「消息内容过长」。
 
 成功响应 `data`：`MessageResponse`（同消息列表结构）。
 
@@ -517,7 +538,7 @@
 
 登录 + 群管理员。修改群名。
 
-请求体：`{ "name": "新群名" }`。非管理员 → `40004`。响应「已更新」。
+请求体：`{ "name": "新群名" }`（trim 后非空、≤128 字符，与创建群聊一致）。非管理员 → `40004`；空名 → `40000`；超 128 字符 → `40000`。响应「已更新」。
 
 #### POST /api/chat/conversations/:id/participants
 
@@ -596,14 +617,6 @@
 - 路径任一级为软链接 → `40006`。
 
 响应：图片扩展名（png/jpg/jpeg/gif/webp/bmp/ico）内联，其余扩展名强制 `Content-Disposition: attachment`；Content-Type 映射（png/jpeg/gif/webp/bmp/ico/txt/md/log/mp4/webm/ogg/mov，缺省 octet-stream）。
-
-#### PUT /api/employees/:id/protect-block
-
-权限：chat:protect_block。设置/取消防拉黑保护。
-
-请求体：`{ "protect_block": 1 }`（int，缺省 0）。
-
-特殊行为：保护账号禁止被删除/禁用/改密/改权/拉黑（见各端点）；本人改自己的头像不受限。员工不存在 → `40006`。响应「已更新」。
 
 ### 4.4 系统模块（system）
 
@@ -717,14 +730,15 @@
 
 ### 6.1 登录节流（F-02）
 
-- 维度：真实 IP（TCP 对端，不信任 `X-Forwarded-For`）+ 用户名双维度。
+- 维度：**「(真实 IP, 用户名) 组合键」+「单 IP 失败总数」**双维度（无全局锁——随机凭据无法锁死全站登录，跨 IP 无法定向锁死单一账号，防 DoS 放大）。
+- 真实 IP：直连取 TCP 对端；经可信反代（`TRUSTED_PROXIES` 白名单命中，支持单 IP/CIDR）时信任 `X-Real-IP`/`X-Forwarded-For` 解析；白名单为空或对端不在白名单时忽略一切转发头。
 - 默认阈值：5 次失败 / 900 秒窗口（环境变量兜底，`system_settings` 可动态调整）。
 - 超限：429（code `40009`）+ `Retry-After` 头；作用于 `login` / `precheck` / `first-login`。
-- 登录成功清除双维度计数；窗口过期自动复位。
+- 登录成功清除该 (IP, 用户名) 与该 IP 的计数；窗口过期自动复位。
 
 ### 6.2 登出与 refresh 轮换（F-22）
 
-- 登出：access 与 refresh 的 `jti` 同时入黑名单，并清除 Cookie。
+- 登出：access 与 refresh 的 `jti` 同时入黑名单，并清除三个 Cookie。
 - 每次 refresh 续期：旧 refresh `jti` 立即入黑名单（轮换），旧令牌不可再次使用。
 
 ### 6.3 改密全端踢出（F-08）
@@ -735,7 +749,13 @@
 
 未注册路径统一回落 401（code `40002`），与匿名访问未认证响应一致，消除路由枚举差分。
 
-### 6.5 前端行为参考
+### 6.5 CSRF 防护（F-7）
+
+- 双提交令牌：登录/刷新签发 `manner_csrf` Cookie（SameSite=Strict、**非 HttpOnly**）；浏览器会话的写方法（POST/PUT/DELETE/PATCH）要求请求头 `X-CSRF-Token` 与 Cookie 值一致，否则 `403`（code `40004`）。
+- 仅对「Cookie 认证 + 写方法」生效；`Authorization: Bearer` 认证（API 客户端，令牌本就在请求头）不受 CSRF 约束。
+- 与 `SameSite=Strict` 叠加，形成同站语义 + 双提交令牌双重防护。
+
+### 6.6 前端行为参考
 
 - `credentials: 'include'` 携带 HttpOnly Cookie。
 - API 路径自动补 `/api` 前缀。

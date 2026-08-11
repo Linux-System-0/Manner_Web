@@ -15,6 +15,9 @@ pub enum AppError {
     #[error("Token 已被注销")]
     TokenRevoked,
 
+    #[error("该用户已在其他设备登录")]
+    SessionExpired,
+
     #[error("无权限访问")]
     Forbidden,
 
@@ -53,6 +56,7 @@ impl IntoResponse for AppError {
             AppError::InvalidCredentials => (StatusCode::UNAUTHORIZED, 40001),
             AppError::Unauthorized => (StatusCode::UNAUTHORIZED, 40002),
             AppError::TokenRevoked => (StatusCode::UNAUTHORIZED, 40003),
+            AppError::SessionExpired => (StatusCode::UNAUTHORIZED, 40010),
             AppError::Forbidden => (StatusCode::FORBIDDEN, 40004),
             AppError::BadRequest(_) => (StatusCode::BAD_REQUEST, 40000),
             AppError::ValidationError(_) => (StatusCode::BAD_REQUEST, 40005),

@@ -1,5 +1,6 @@
 use std::net::SocketAddr;
-use axum::extract::{ConnectInfo, State};
+use axum::extract::{ConnectInfo, FromRequestParts, State};
+use axum::http::request::Parts;
 use axum::Json;
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -12,16 +13,33 @@ use crate::models::employee::{
     ChangePasswordRequest, Employee, FirstLoginRequest, LoginRequest, LoginResponse,
     LoginUserInfo, PrecheckRequest, PrecheckResponse, RegisterRequest,
 };
-use crate::services::auth::{hash_password, verify_password};
+use crate::services::auth::{hash_password, validate_password_strength, verify_password};
 use crate::utils::jwt::{create_refresh_token, create_token, validate_token};
 use crate::utils::response::ApiResponse;
+use crate::utils::trusted_proxy;
 
-/// 客户端来源 IP。
-/// 注意：不信任 X-Forwarded-For / X-Real-IP（可被伪造绕过限流与日志溯源）。
-/// 直接绑定场景下以 TCP 对端地址为准；如需经反向代理部署，应单独配置可信代理白名单。
-fn get_client_ip(addr: Option<SocketAddr>) -> String {
-    addr.map(|a| a.ip().to_string())
-        .unwrap_or_else(|| "-".to_string())
+/// 真实客户端 IP 提取器（FromRequestParts，不消费 body，可与其他 body 型 extractor 共存）。
+/// 直连场景以 TCP 对端地址为准；经可信反向代理部署时（对端命中 TRUSTED_PROXIES
+/// 白名单）信任 X-Real-IP / X-Forwarded-For，否则一律忽略转发头（防伪造绕过限流）。
+#[derive(Debug, Clone)]
+pub struct ClientIp(pub String);
+
+#[async_trait::async_trait]
+impl FromRequestParts<AppState> for ClientIp {
+    type Rejection = AppError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let peer = parts
+            .extensions
+            .get::<ConnectInfo<SocketAddr>>()
+            .map(|c| c.0);
+        let ip =
+            trusted_proxy::resolve_client_ip(peer, &parts.headers, &state.config.trusted_proxies);
+        Ok(ClientIp(ip))
+    }
 }
 
 /// 从请求 Cookie 头中提取指定名称的 cookie 值。
@@ -51,14 +69,18 @@ pub fn user_tag(name: &str, username: &str) -> String {
     }
 }
 
-pub fn append_log(log_file: &str, msg: &str) {
+pub fn append_log(log_file: &str, msg: &str, ip: &str) {
     if let Ok(line) = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
     {
         let ts = chrono::DateTime::from_timestamp(line.as_secs() as i64, 0)
             .map(|d| d.format("%Y-%m-%d %H:%M:%S").to_string())
             .unwrap_or_else(|| "unknown".to_string());
-        let entry = format!("[{}] {}\n", ts, msg);
+        // 防日志注入：剥离消息中的控制字符（\n、\r、\0 等），
+        // 防止用户可控内容（如聊天消息）伪造审计日志行、污染日志结构。
+        let safe_msg: String = msg.chars().filter(|c| !c.is_control()).collect();
+        // 无论何种业务日志，统一在末尾追加访问 IP，保证可审计。
+        let entry = format!("[{}] {} | IP: {}\n", ts, safe_msg.trim(), ip);
         let _ = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
@@ -96,10 +118,15 @@ pub async fn register(
         return Err(AppError::Forbidden);
     }
 
+    let username = body.username.trim().to_string();
+    if username.is_empty() || username.chars().count() > 64 {
+        return Err(AppError::ValidationError("用户名不能为空且不超过 64 个字符".to_string()));
+    }
+
     let username_exists = sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(*) FROM employees WHERE username = ?",
     )
-    .bind(&body.username)
+    .bind(&username)
     .fetch_one(&mut *tx)
     .await?;
 
@@ -107,17 +134,26 @@ pub async fn register(
         return Err(AppError::Conflict);
     }
 
+    validate_password_strength(&body.password)?;
+
     let id = Uuid::new_v4().to_string();
+    // 敏感字段静态加密后落库（首个管理员注册时填写的邮箱，密钥 FIELD_ENC_KEY）。
+    let email = match body.email {
+        Some(e) if !e.trim().is_empty() => {
+            Some(crate::utils::crypto::encrypt_field(e.trim(), &state.config.field_enc_key)?)
+        }
+        _ => None,
+    };
     let password = hash_password(&body.password, state.config.bcrypt_cost)?;
 
     sqlx::query(
         "INSERT INTO employees (id, username, password, name, email) VALUES (?, ?, ?, ?, ?)",
     )
     .bind(&id)
-    .bind(&body.username)
+    .bind(&username)
     .bind(&password)
     .bind(&body.name)
-    .bind(&body.email)
+    .bind(&email)
     .execute(&mut *tx)
     .await?;
 
@@ -150,7 +186,7 @@ pub async fn register(
 
     let user_info = LoginUserInfo {
         id,
-        username: body.username,
+        username,
         name: body.name,
         permissions,
         avatar: None,
@@ -162,10 +198,10 @@ pub async fn register(
 
 pub async fn login(
     State(state): State<AppState>,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    client_ip: ClientIp,
     Json(body): Json<LoginRequest>,
 ) -> Result<Response, AppError> {
-    let ip = get_client_ip(Some(addr));
+    let ip = client_ip.0;
 
     // F-02: 登录失败节流（真实 IP + 用户名双维度）。已锁定 → 429 + Retry-After。
     {
@@ -199,7 +235,11 @@ pub async fn login(
     // F-13: 校验账号状态。status=0（禁用/离职）拒绝登录，且统一返回与密码错误一致的
     // 错误消息（避免向攻击者泄露「账号存在但被禁用」的枚举信号）。
     if employee.status != 1 {
-        append_log(&state.config.log_file, &format!("用户 {} ({}) 登录被拒绝: 账号已禁用, IP: {}", employee.name, employee.username, ip));
+        append_log(
+            &state.config.log_file,
+            &format!("用户 {} ({}) 登录被拒绝: 账号已禁用", employee.name, employee.username),
+            &ip,
+        );
         return Err(AppError::InvalidCredentials);
     }
 
@@ -209,19 +249,24 @@ pub async fn login(
         throttle.clear(&ip, &body.username);
     }
 
-    append_log(&state.config.log_file, &format!(
-        "用户 {} ({}) 登录成功, IP: {}",
-        employee.name, employee.username, ip
-    ));
+    append_log(
+        &state.config.log_file,
+        &format!("用户 {} ({}) 登录成功", employee.name, employee.username),
+        &ip,
+    );
 
-    issue_session(&state, &employee).await
+    issue_session(&state, &employee, None).await
 }
 
 /// 为已认证员工签发完整会话（access + refresh 令牌、双 Cookie、LoginResponse）。
 /// login / first_login / refresh 共用，保证三种入口的会话结构一致。
+///
+/// `session_id`：login / first_login 传 None → 生成新会话并覆盖 employees.active_session
+/// （单设备登录：旧设备令牌立即失效）；refresh 传当前会话 id → 复用同一会话，不覆盖。
 async fn issue_session(
     state: &AppState,
     employee: &Employee,
+    session_id: Option<&str>,
 ) -> Result<Response, AppError> {
     // F-08: 取数据库最新 pwd_version（first_login 改密后已递增，旧令牌全部失效）。
     let pwd_version: i64 = sqlx::query_scalar("SELECT pwd_version FROM employees WHERE id = ?")
@@ -238,12 +283,26 @@ async fn issue_session(
     .fetch_all(&state.pool)
     .await?;
 
+    let session_id = match session_id {
+        Some(sid) if !sid.is_empty() => sid.to_string(),
+        _ => {
+            let sid = Uuid::new_v4().to_string();
+            sqlx::query("UPDATE employees SET active_session = ? WHERE id = ?")
+                .bind(&sid)
+                .bind(&employee.id)
+                .execute(&state.pool)
+                .await?;
+            sid
+        }
+    };
+
     let token = create_token(
         &employee.id,
         &employee.username,
         &employee.name,
         &permissions,
         pwd_version,
+        &session_id,
         &state.config.jwt_secret,
         state.config.token_expire_minutes,
     )?;
@@ -253,6 +312,7 @@ async fn issue_session(
         &employee.username,
         &employee.name,
         pwd_version,
+        &session_id,
         &state.config.jwt_secret,
         state.config.refresh_token_expire_days,
     )?;
@@ -276,6 +336,12 @@ async fn issue_session(
         refresh_max_age,
         state.config.cookie_secure,
     );
+    // F7: 双提交 CSRF 令牌 Cookie（非 HttpOnly，前端 JS 读取后随写请求回传 X-CSRF-Token）。
+    // SameSite=Strict + CSRF 校验双保险；Bearer 认证（API 客户端）不依赖 Cookie，不受影响。
+    let csrf_value = Uuid::new_v4().to_string();
+    let secure_flag = if state.config.cookie_secure { "; Secure" } else { "" };
+    let csrf_cookie_value =
+        format!("manner_csrf={csrf_value}; SameSite=Strict; Path=/; Max-Age={refresh_max_age}{secure_flag}");
 
     let response = LoginResponse {
         token,
@@ -288,6 +354,9 @@ async fn issue_session(
         resp.headers_mut().insert(header::SET_COOKIE, hv);
     }
     if let Ok(hv) = header::HeaderValue::from_str(&refresh_cookie_value) {
+        resp.headers_mut().append(header::SET_COOKIE, hv);
+    }
+    if let Ok(hv) = header::HeaderValue::from_str(&csrf_cookie_value) {
         resp.headers_mut().append(header::SET_COOKIE, hv);
     }
     Ok(resp)
@@ -326,11 +395,15 @@ pub async fn logout(
 
     let clear_cookie = "manner_token=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0";
     let clear_refresh_cookie = "manner_refresh=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0";
+    let clear_csrf_cookie = "manner_csrf=; SameSite=Strict; Path=/; Max-Age=0";
     let mut resp = (StatusCode::OK, Json(ApiResponse::<()>::ok_msg("ok"))).into_response();
     if let Ok(hv) = header::HeaderValue::from_str(clear_cookie) {
         resp.headers_mut().insert(header::SET_COOKIE, hv);
     }
     if let Ok(hv) = header::HeaderValue::from_str(clear_refresh_cookie) {
+        resp.headers_mut().append(header::SET_COOKIE, hv);
+    }
+    if let Ok(hv) = header::HeaderValue::from_str(clear_csrf_cookie) {
         resp.headers_mut().append(header::SET_COOKIE, hv);
     }
     Ok(resp)
@@ -353,6 +426,8 @@ pub async fn change_password(
     if !valid {
         return Err(AppError::OldPasswordMismatch);
     }
+
+    validate_password_strength(&body.new_password)?;
 
     let new_password = hash_password(&body.new_password, state.config.bcrypt_cost)?;
 
@@ -446,9 +521,9 @@ pub async fn me(
         "id": employee.id,
         "username": employee.username,
         "name": employee.name,
-        "email": employee.email,
+        "email": crate::utils::crypto::mask_field(employee.email),
         "title": employee.title,
-        "phone": employee.phone,
+        "phone": crate::utils::crypto::mask_field(employee.phone),
         "avatar": employee.avatar,
         "permissions": auth.permissions,
     }))))
@@ -465,10 +540,10 @@ pub async fn me(
 ///   凭用户名无法完成任何操作——激活仍要求初始密码正确（first_login 校验）。
 pub async fn precheck(
     State(state): State<AppState>,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    client_ip: ClientIp,
     Json(body): Json<PrecheckRequest>,
 ) -> Result<Json<ApiResponse<PrecheckResponse>>, AppError> {
-    let ip = get_client_ip(Some(addr));
+    let ip = client_ip.0;
 
     // F-21: 节流（与登录一致：真实 IP + 用户名双维度），防止接口被用于批量账号枚举。
     {
@@ -498,12 +573,12 @@ pub async fn precheck(
 /// InvalidCredentials，并复用登录节流（F-02，真实 IP + 用户名双维度）防暴力尝试。
 pub async fn first_login(
     State(state): State<AppState>,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    client_ip: ClientIp,
     Json(body): Json<FirstLoginRequest>,
 ) -> Result<Response, AppError> {
-    let ip = get_client_ip(Some(addr));
+    let ip = client_ip.0;
 
-    // F-02: 节流（真实 IP + 用户名双维度），缓解待激活账号被枚举/抢先激活的暴力尝试。
+    // F-02: 节流（真实 IP + 用户名组合，防暴力/枚举），已锁定 → 429 + Retry-After。
     {
         let mut throttle = state.login_throttle.lock().await;
         throttle.check(&ip, &body.username)?;
@@ -516,7 +591,10 @@ pub async fn first_login(
     .fetch_optional(&state.pool)
     .await?;
 
+    // F-3: 所有提前返回分支统一执行等开销 bcrypt 假校验（与下方真实校验一致），
+    // 消除「待激活账号（慢）vs 非激活/不存在（快）」的时序侧信道枚举。
     let Some(mut employee) = employee else {
+        let _ = verify_password(&body.initial_password, &state.login_dummy_hash);
         let mut throttle = state.login_throttle.lock().await;
         throttle.record_failure(&ip, &body.username);
         return Err(AppError::InvalidCredentials);
@@ -524,6 +602,7 @@ pub async fn first_login(
 
     // 仅「首次登录待设置密码」账号可走此流程（统一错误，不泄露账号状态）。
     if employee.must_change_password != 1 {
+        let _ = verify_password(&body.initial_password, &state.login_dummy_hash);
         let mut throttle = state.login_throttle.lock().await;
         throttle.record_failure(&ip, &body.username);
         return Err(AppError::InvalidCredentials);
@@ -531,6 +610,7 @@ pub async fn first_login(
 
     // F-13: 禁用账号不允许激活（统一错误，不泄露禁用状态）。
     if employee.status != 1 {
+        let _ = verify_password(&body.initial_password, &state.login_dummy_hash);
         let mut throttle = state.login_throttle.lock().await;
         throttle.record_failure(&ip, &body.username);
         return Err(AppError::InvalidCredentials);
@@ -545,10 +625,8 @@ pub async fn first_login(
         return Err(AppError::InvalidCredentials);
     }
 
-    // 新密码强度：与注册/修改密码一致（至少 8 位）。
-    if body.new_password.len() < 8 {
-        return Err(AppError::ValidationError("密码至少 8 位".to_string()));
-    }
+    // 新密码强度：与注册/修改密码/重置密码一致。
+    validate_password_strength(&body.new_password)?;
 
     let new_password = hash_password(&body.new_password, state.config.bcrypt_cost)?;
 
@@ -571,10 +649,11 @@ pub async fn first_login(
 
     append_log(
         &state.config.log_file,
-        &format!("用户 {} ({}) 首次登录设置密码成功, IP: {}", employee.name, employee.username, ip),
+        &format!("用户 {} ({}) 首次登录设置密码成功", employee.name, employee.username),
+        &ip,
     );
 
-    issue_session(&state, &employee).await
+    issue_session(&state, &employee, None).await
 }
 
 /// 静默续期：用 refresh 令牌换取全新 access + refresh 会话（旋转式双 Cookie）。
@@ -610,19 +689,26 @@ pub async fn refresh(
     }
 
     // F-08 + F-13: 用户必须存在、启用且 pwd_version 与令牌一致。
-    let account: Option<(i64, i8)> = sqlx::query_as(
-        "SELECT pwd_version, status FROM employees WHERE id = ?",
+    let account: Option<(i64, i8, Option<String>)> = sqlx::query_as(
+        "SELECT pwd_version, status, active_session FROM employees WHERE id = ?",
     )
     .bind(&claims.sub)
     .fetch_optional(&state.pool)
     .await?;
 
-    let Some((stored_pwd_version, stored_status)) = account else {
+    let Some((stored_pwd_version, stored_status, active_session)) = account else {
         return Err(AppError::Unauthorized);
     };
 
     if stored_pwd_version != claims.pwd_version || stored_status != 1 {
         return Err(AppError::Unauthorized);
+    }
+
+    // 单设备登录：若该账号已在别处重新登录（active_session 已更新），本会话续期被拒绝。
+    if let Some(active) = active_session {
+        if !active.is_empty() && active != claims.sid {
+            return Err(AppError::SessionExpired);
+        }
     }
 
     let employee = sqlx::query_as::<_, Employee>(
@@ -644,5 +730,5 @@ pub async fn refresh(
         .execute(&state.pool)
         .await?;
 
-    issue_session(&state, &employee).await
+    issue_session(&state, &employee, Some(&claims.sid)).await
 }

@@ -101,8 +101,8 @@
             </div>
           </div>
           <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">
-            <Button size="small" onClick={cancel}>{cancelText}</Button>
-            <Button size="small" type="primary" danger={okDanger} loading={loading} onClick={confirm}>{okText}</Button>
+            <Button size="small" tooltip="取消操作" onClick={cancel}>{cancelText}</Button>
+            <Button size="small" type="primary" danger={okDanger} loading={loading} tooltip="确认执行该操作" onClick={confirm}>{okText}</Button>
           </div>
         </div>
       </div>

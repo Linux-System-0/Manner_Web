@@ -6,9 +6,11 @@
   import { onMount, onDestroy } from 'svelte'
   import { page } from '$app/stores'
   import { authStore } from '$lib/stores/auth'
-  import { formatTime, getGlobalPrefs, subscribe as subscribePrefs } from '$lib/stores/preferences'
+  import { formatTime, getGlobalPrefs, subscribe as subscribePrefs, preferencesStore } from '$lib/stores/preferences'
+  import { getMe } from '$lib/api/auth'
   import {
     getConversations,
+    createGroupConversation,
     getMessages,
     sendMessage,
     updateConversationName,
@@ -65,6 +67,11 @@
 
   let allEmployees = $state<Array<{ id: string; name: string }>>([])
 
+  // ---- 创建群聊 ----
+  let createGroupModal = $state(false)
+  let createGroupName = $state('')
+  let createGroupMembers = $state<string[]>([])
+
   // ---- 黑名单 ----
   let blockModal = $state(false)
 
@@ -93,11 +100,36 @@
 
   // ---- 数据获取 ----
 
+  let identitySyncing = false
+
+  /** 服务端返回的身份(my_id)与本地 authStore 不一致时，以 /auth/me 为准同步本地登录态，
+   *  解决同浏览器登录第二个账号后「界面显示 A、实际以 B 身份操作」的错乱。 */
+  async function reconcileIdentity(myId?: string) {
+    if (!myId) return
+    if (myId === $authStore.user?.id) return
+    if (identitySyncing) return
+    identitySyncing = true
+    try {
+      const res = await getMe()
+      if (res.code === 0 && res.data) {
+        authStore.setUser(res.data)
+        await preferencesStore.refresh()
+      }
+    } catch {
+      /* client 已处理 401 */
+    } finally {
+      identitySyncing = false
+    }
+  }
+
   async function fetchConversations() {
     loading = true
     try {
       const res = await getConversations()
-      if (res.code === 0 && res.data) conversations = res.data
+      if (res.code === 0 && res.data) {
+        conversations = res.data
+        reconcileIdentity(res.data[0]?.my_id)
+      }
     } catch {
       /* ignore */
     }
@@ -110,6 +142,7 @@
       const res = await getConversations()
       if (res.code !== 0 || !res.data) return
       const newConvs: Conversation[] = res.data
+      reconcileIdentity(newConvs[0]?.my_id)
       const existingIds = new Set(conversations.map((c) => c.id))
       const append = newConvs.filter((c) => !existingIds.has(c.id))
       const updated = conversations.map((c) => newConvs.find((n) => n.id === c.id) || c)
@@ -309,7 +342,7 @@
       settingsOpen = false
       const conv = conversations.find((c) => {
         if (c.type !== 'single') return false
-        const other = c.participants.find((p) => p.id !== $authStore.user?.id)
+        const other = c.participants.find((p) => p.id !== selfIdOf(c))
         return other?.id === blockedId && c.id === selectedConv
       })
       if (conv) selectedConv = null
@@ -330,7 +363,7 @@
       await fetchBlocked()
       const conv = conversations.find((c) => {
         if (c.type !== 'single') return false
-        const other = c.participants.find((p) => p.id !== $authStore.user?.id)
+        const other = c.participants.find((p) => p.id !== selfIdOf(c))
         return other?.id === blockedId && c.id === selectedConv
       })
       if (conv) selectedConv = null
@@ -351,7 +384,7 @@
 
   const otherUserId = $derived(
     settingsConv?.type === 'single'
-      ? settingsConv.participants.find((p) => p.id !== $authStore.user?.id)?.id || ''
+      ? settingsConv.participants.find((p) => p.id !== selfIdOf(settingsConv))?.id || ''
       : '',
   )
 
@@ -510,25 +543,67 @@
     }
   }
 
+  async function openCreateGroup() {
+    createGroupName = ''
+    createGroupMembers = []
+    createGroupModal = true
+    try {
+      const res = await getChatEmployees()
+      if (res.code === 0 && res.data) allEmployees = res.data
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async function createGroup() {
+    if (!createGroupName.trim()) {
+      message.error('请输入群聊名称')
+      return
+    }
+    if (createGroupMembers.length === 0) {
+      message.error('请至少选择 1 名成员')
+      return
+    }
+    try {
+      const res = await createGroupConversation(createGroupName.trim(), createGroupMembers)
+      if (res.code !== 0 || !res.data) {
+        message.error(res.message || '创建失败')
+        return
+      }
+      message.success('群聊已创建')
+      createGroupModal = false
+      await fetchConversations()
+      selectedConv = res.data.id
+    } catch (err) {
+      message.error(getApiError(err, '创建失败'))
+    }
+  }
+
   // ---- 展示辅助 ----
+
+  /** 服务端认证的当前用户 id：优先取接口返回的 my_id（与后端认证身份一致），
+   *  兜底用本地 authStore（未携带 my_id 的旧响应 / 创建会话等场景）。 */
+  function selfIdOf(item: { my_id?: string } | null | undefined): string | undefined {
+    return item?.my_id || $authStore.user?.id
+  }
 
   function getConvName(conv: Conversation): string {
     if (conv.type === 'group') return conv.my_group_note || conv.name || '群聊'
-    const other = conv.participants.find((p) => p.id !== $authStore.user?.id)
+    const other = conv.participants.find((p) => p.id !== selfIdOf(conv))
     const otherInfo = conv.participants.find((p) => p.id === other?.id)
     return conv.my_group_note || otherInfo?.nickname || other?.name || '未知'
   }
 
   function getOtherAvatar(conv: Conversation): string | undefined {
     if (conv.type === 'group') return undefined
-    const other = conv.participants.find((p) => p.id !== $authStore.user?.id)
+    const other = conv.participants.find((p) => p.id !== selfIdOf(conv))
     return other?.avatar || undefined
   }
 
   const filteredConversations = $derived(
     conversations.filter((conv) => {
       if (conv.type === 'single') {
-        const other = conv.participants.find((p) => p.id !== $authStore.user?.id)
+        const other = conv.participants.find((p) => p.id !== selfIdOf(conv))
         return !!other && !isBlocked(other.id)
       }
       return true
@@ -638,6 +713,13 @@
                   {#snippet icon()}<Icon name="stop" />{/snippet}
                 </Button>
               </Tooltip>
+              {#if $authStore.permissions.includes('chat:group_create')}
+                <Tooltip title="创建群聊">
+                  <Button size="small" onClick={openCreateGroup}>
+                    {#snippet icon()}<Icon name="plus" />{/snippet}
+                  </Button>
+                </Tooltip>
+              {/if}
               {#if reorderMode}
                 <Tooltip title="完成排序">
                   <Button size="small" type="primary" onClick={() => (reorderMode = false)}>
@@ -738,7 +820,7 @@
               <Text type="secondary" style="font-size:12px">({selectedConvData.participants.length} 人)</Text>
             {/if}
           </div>
-          <Button type="text" onClick={() => openSettings(selectedConvData)}>
+          <Button type="text" tooltip="打开聊天设置" onClick={() => openSettings(selectedConvData)}>
             {#snippet icon()}<Icon name="setting" />{/snippet}
           </Button>
         </div>
@@ -771,7 +853,7 @@
           <div style="text-align:center;color:#999;margin-top:60px">暂无消息</div>
         {:else}
           {#each messages as msg (msg.id)}
-            {@const isMe = msg.sender_id === $authStore.user?.id}
+            {@const isMe = msg.sender_id === (msg.my_id || $authStore.user?.id)}
             {@const name = msg.file_name || msg.content || ''}
             {@const safeFileUrl =
               typeof msg.file_url === 'string' && msg.file_url.startsWith('/uploads/chat/')
@@ -822,7 +904,7 @@
 
       <div style="padding:8px 16px;border-top:1px solid var(--chat-border-color)">
         <div style="display:flex;gap:8px;align-items:flex-end">
-          <Button onClick={() => fileInputEl?.click()}>
+          <Button tooltip="选择并发送文件或图片" onClick={() => fileInputEl?.click()}>
             {#snippet icon()}<Icon name="paper-clip" />{/snippet}
           </Button>
           <input bind:this={fileInputEl} type="file" style="display:none" onchange={handleFileSend} />
@@ -835,7 +917,7 @@
             oninput={onTextareaInput}
             onkeydown={onTextareaKeydown}
           ></textarea>
-          <Button type="primary" onClick={handleSend}>
+          <Button type="primary" tooltip="发送当前消息" onClick={handleSend}>
             {#snippet icon()}<Icon name="send" />{/snippet}发送
           </Button>
         </div>
@@ -864,11 +946,44 @@
             <Avatar><span style="display:inline-flex"><Icon name="user" /></span></Avatar>
             <span>{item.name}</span>
           </div>
-          <Button size="small" onClick={() => handleUnblock(item.id)}>取消拉黑</Button>
+          <Button size="small" tooltip="将此人移出黑名单，恢复聊天" onClick={() => handleUnblock(item.id)}>取消拉黑</Button>
         </li>
       {/each}
     </ul>
   {/if}
+</Modal>
+
+<!-- 创建群聊 -->
+<Modal
+  title="创建群聊"
+  open={createGroupModal}
+  onOk={createGroup}
+  onclose={() => (createGroupModal = false)}
+  okText="创建"
+  cancelText="取消"
+  width={480}
+>
+  <div style="display:flex;flex-direction:column;gap:16px">
+    <div>
+      <div style="font-weight:600;margin-bottom:8px">群聊名称</div>
+      <Input
+        value={createGroupName}
+        onInput={(v) => (createGroupName = v)}
+        placeholder="请输入群聊名称（≤128 字）"
+        maxlength={128}
+      />
+    </div>
+    <div>
+      <div style="font-weight:600;margin-bottom:8px">选择成员</div>
+      <Select
+        multiple
+        placeholder="选择成员（可多选）"
+        value={createGroupMembers}
+        onChange={(v) => (createGroupMembers = Array.isArray(v) ? v.map(String) : [])}
+        options={allEmployees.map((e) => ({ value: e.id, label: e.name }))}
+      />
+    </div>
+  </div>
 </Modal>
 
 <!-- 聊天设置 -->
@@ -879,16 +994,16 @@
         <span style="font-weight:600">备注</span>
         <div style="display:flex;gap:8px;margin-top:8px">
           <Input value={myNickname} onInput={(v) => (myNickname = v)} placeholder="给对方设置备注（仅自己可见）" />
-          <Button onClick={save1v1Remark}>保存</Button>
+          <Button tooltip="保存此备注" onClick={save1v1Remark}>保存</Button>
         </div>
       </div>
       <div>
         <span style="font-weight:600">操作</span>
         <div style="margin-top:8px">
           {#if isBlocked(otherUserId)}
-            <Button danger onClick={() => handleUnblock(otherUserId)}>取消拉黑</Button>
+            <Button danger tooltip="将此人移出黑名单，恢复聊天" onClick={() => handleUnblock(otherUserId)}>取消拉黑</Button>
           {:else}
-            <Button danger onClick={() => handleBlock(otherUserId)}>
+            <Button danger tooltip="拉黑该用户，不再接收其消息" onClick={() => handleBlock(otherUserId)}>
               {#snippet icon()}<Icon name="stop" />{/snippet}拉黑
             </Button>
           {/if}
@@ -900,12 +1015,12 @@
           <span style="font-weight:600">群聊名称</span>
           <div style="display:flex;gap:8px;margin-top:8px">
             <Input value={newGroupName} onInput={(v) => (newGroupName = v)} />
-            <Button onClick={saveGroupName}>保存</Button>
+            <Button tooltip="保存群聊名称" onClick={saveGroupName}>保存</Button>
           </div>
         </div>
         <div style="margin-bottom:16px">
           <Popconfirm title="确定解散群聊？此操作不可恢复！" onConfirm={disbandGroup}>
-            <Button danger>
+            <Button danger tooltip="解散该群聊，此操作不可恢复">
               {#snippet icon()}<Icon name="delete" />{/snippet}解散群聊
             </Button>
           </Popconfirm>
@@ -915,14 +1030,14 @@
         <span style="font-weight:600">我的群昵称</span>
         <div style="display:flex;gap:8px;margin-top:8px">
           <Input value={myNickname} onInput={(v) => (myNickname = v)} placeholder="设置我在群内的显示名称" />
-          <Button onClick={saveMyNickname}>保存</Button>
+          <Button tooltip="保存我的群昵称" onClick={saveMyNickname}>保存</Button>
         </div>
       </div>
       <div style="margin-bottom:16px">
         <span style="font-weight:600">群聊备注</span>
         <div style="display:flex;gap:8px;margin-top:8px">
           <Input value={groupNote} onInput={(v) => (groupNote = v)} placeholder="设置后覆盖群聊名称显示" />
-          <Button onClick={saveGroupNote}>保存</Button>
+          <Button tooltip="保存群聊备注" onClick={saveGroupNote}>保存</Button>
         </div>
         <div style="margin-top:4px;font-size:12px;color:#999">设置后，会话列表中将以备注名称显示该群聊</div>
       </div>
@@ -930,7 +1045,7 @@
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
           <span style="font-weight:600">成员管理</span>
           {#if settingsConv.my_role === 'admin'}
-            <Button type="text" size="small" onClick={openAddUser}>
+            <Button type="text" size="small" tooltip="添加新成员" onClick={openAddUser}>
               {#snippet icon()}<Icon name="plus" />{/snippet}
             </Button>
           {/if}
@@ -954,16 +1069,16 @@
               {#if settingsConv.my_role === 'admin' && p.id !== $authStore.user?.id}
                 <div style="display:flex;gap:4px;flex-shrink:0">
                   {#if p.role === 'admin'}
-                    <Button type="text" size="small" style="border-radius:50%" onClick={() => changeRole(p.id, 'member')}>
+                    <Button type="text" size="small" style="border-radius:50%" tooltip="降为普通成员" onClick={() => changeRole(p.id, 'member')}>
                       {#snippet icon()}<Icon name="swap" />{/snippet}
                     </Button>
                   {:else}
-                    <Button type="text" size="small" style="border-radius:50%" onClick={() => changeRole(p.id, 'admin')}>
+                    <Button type="text" size="small" style="border-radius:50%" tooltip="设为管理员" onClick={() => changeRole(p.id, 'admin')}>
                       {#snippet icon()}<Icon name="crown" />{/snippet}
                     </Button>
                   {/if}
                   <Popconfirm title="确定移除该成员？" onConfirm={() => removeMember(p.id)}>
-                    <Button type="text" size="small" danger={true} style="border-radius:50%">
+                    <Button type="text" size="small" danger={true} style="border-radius:50%" tooltip="移除该成员">
                       {#snippet icon()}<Icon name="minus-circle" />{/snippet}
                     </Button>
                   </Popconfirm>

@@ -10,6 +10,7 @@
   import Input from '$lib/components/Input.svelte'
   import DatePicker from '$lib/components/DatePicker.svelte'
   import Button from '$lib/components/Button.svelte'
+  import Modal from '$lib/components/Modal.svelte'
   import Result from '$lib/components/Result.svelte'
   import { message } from '$lib/components/message'
 
@@ -22,6 +23,9 @@
   let address = $state('')
   let hireDate = $state('')
   let submitting = $state(false)
+
+  // F-08: 创建成功后的初始密码展示弹窗（页面内弹窗展示，不用 toast 提示显示密码）
+  let pwdModal = $state({ open: false, password: '' })
 
   let errors = $state<Record<string, string>>({})
 
@@ -56,10 +60,11 @@
       // F-02: 后端生成一次性初始密码，仅在此响应中返回一次
       const initialPassword = (res.data as unknown as { initial_password?: string })?.initial_password
       if (initialPassword) {
-        message.success(`创建成功，初始密码：${initialPassword}（员工首次登录后需修改密码）`)
-      } else {
-        message.success('创建成功')
+        // F-08: 初始密码改为页面内弹窗展示，关闭弹窗后再跳转列表
+        pwdModal = { open: true, password: initialPassword }
+        return
       }
+      message.success('创建成功')
       goto('/employees')
     } catch (err: unknown) {
       message.error(getApiError(err, '创建失败'))
@@ -67,12 +72,27 @@
       submitting = false
     }
   }
+
+  function closePwdModal() {
+    pwdModal = { open: false, password: '' }
+    message.success('创建成功')
+    goto('/employees')
+  }
+
+  async function copyPwd() {
+    try {
+      await navigator.clipboard.writeText(pwdModal.password)
+      message.success('已复制到剪贴板')
+    } catch {
+      message.error('复制失败，请手动选择复制')
+    }
+  }
 </script>
 
 {#if !$authStore.permissions.includes('employee:create')}
   <Result status="403" title="403" subTitle="抱歉，你无权访问该页面">
     {#snippet extra()}
-      <Button type="primary" onClick={() => goto('/employees')}>返回列表</Button>
+      <Button type="primary" tooltip="返回员工列表页" onClick={() => goto('/employees')}>返回列表</Button>
     {/snippet}
   </Result>
 {:else}
@@ -147,13 +167,37 @@
 
         <FormItem label="">
           <div style="display:flex;gap:12px">
-            <Button type="primary" htmlType="submit" loading={submitting}>创建</Button>
-            <Button onClick={() => goto('/employees')}>取消</Button>
+            <Button type="primary" htmlType="submit" loading={submitting} tooltip="提交表单，创建新员工">创建</Button>
+            <Button tooltip="放弃填写，返回员工列表" onClick={() => goto('/employees')}>取消</Button>
           </div>
         </FormItem>
       </Form>
     </Card>
   </div>
+
+  <!-- F-08: 初始密码展示弹窗（一次性密码，禁止遮罩点击误关） -->
+  <Modal
+    open={pwdModal.open}
+    title="员工创建成功"
+    onclose={closePwdModal}
+    onOk={closePwdModal}
+    okText="我知道了"
+    cancelText="关闭"
+    maskClosable={false}
+  >
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <span style="color:var(--ant-color-text-secondary)">
+        账号已创建，以下为一次性初始密码（仅显示一次，请复制并妥善保存）：
+      </span>
+      <div style="display:flex;align-items:center;gap:8px">
+        <code
+          style="flex:1;padding:8px 12px;border:1px solid var(--ant-color-border-secondary);border-radius:6px;background:var(--ant-color-fill-secondary);font-size:16px;letter-spacing:1px;user-select:all"
+        >{pwdModal.password}</code>
+        <Button size="small" tooltip="复制初始密码到剪贴板" onClick={copyPwd}>复制</Button>
+      </div>
+      <span style="color:var(--ant-color-warning)">员工首次登录后需修改密码</span>
+    </div>
+  </Modal>
 {/if}
 
 <style>

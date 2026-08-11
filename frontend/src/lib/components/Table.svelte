@@ -70,7 +70,7 @@
   <Spin spinning={loading}>
     <div
       class="ant-table {sizeCls}"
-      style={scroll ? `max-width:${typeof scroll.x === 'number' ? scroll.x + 'px' : scroll.x};overflow:auto` : ''}
+      style={scroll ? `min-width:${typeof scroll.x === 'number' ? scroll.x + 'px' : scroll.x};overflow:auto` : ''}
     >
       <div class="ant-table-container">
         <table style="width:100%;border-collapse:separate;border-spacing:0">

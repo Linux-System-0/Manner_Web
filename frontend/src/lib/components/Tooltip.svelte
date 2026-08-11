@@ -10,6 +10,8 @@
     children,
     disabled = false,
     gap = 8,
+    block = false,
+    wrapperStyle = '',
   }: {
     title?: string
     position?: 'top' | 'bottom' | 'left' | 'right'
@@ -17,6 +19,10 @@
     disabled?: boolean
     /** 气泡与触发元素之间的间距（px） */
     gap?: number
+    /** 触发元素占满整行（用于 block 按钮） */
+    block?: boolean
+    /** 触发包装器的自定义样式（覆盖默认 display） */
+    wrapperStyle?: string
   } = $props()
 
   let show = $state(false)
@@ -75,7 +81,7 @@
 <span
   bind:this={triggerEl}
   class="ant-tooltip-trigger"
-  style="display:inline-flex"
+  style={wrapperStyle || `display:${block ? 'flex' : 'inline-flex'}`}
   role="note"
   tabindex={0}
   aria-describedby="ant-tooltip"
@@ -104,9 +110,10 @@
     position: fixed;
     z-index: 1070;
     max-width: 250px;
-    padding: 4px 0;
+    padding: 2px 0;
     color: #fff;
-    font-size: var(--ant-font-size-sm);
+    font-size: 12px;
+    line-height: 1.4;
     pointer-events: none;
     /* 进入动画：淡入 + 沿 placement 方向轻微位移 */
     animation: ant-tooltip-in 0.15s ease-out;
@@ -135,8 +142,8 @@
     }
   }
   .ant-tooltip-inner {
-    padding: 6px 8px;
-    min-height: 32px;
+    padding: 3px 8px;
+    min-height: 24px;
     background: var(--ant-color-bg-spotlight);
     border-radius: var(--ant-border-radius);
     box-shadow: var(--ant-box-shadow);

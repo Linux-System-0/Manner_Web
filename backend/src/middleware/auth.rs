@@ -30,6 +30,7 @@ pub async fn auth_middleware(
     // F15: token 来源双通道——优先 Authorization: Bearer（API 客户端），
     // 回退到 HttpOnly Cookie `manner_token`（浏览器会话）。Cookie 由 login 下发、
     // logout 清除，前端不再将 JWT 落入 localStorage（消除 XSS 窃取面）。
+    let mut via_cookie = false;
     let token = req
         .headers()
         .get("Authorization")
@@ -37,6 +38,7 @@ pub async fn auth_middleware(
         .and_then(|h| h.strip_prefix("Bearer "))
         .map(|t| t.to_string())
         .or_else(|| {
+            via_cookie = true;
             req.headers()
                 .get("cookie")
                 .and_then(|h| h.to_str().ok())
@@ -70,23 +72,64 @@ pub async fn auth_middleware(
         return Err(AppError::TokenRevoked);
     }
 
+    // F7: 双提交 CSRF 校验——仅对「Cookie 认证 + 写方法」强制要求
+    // `X-CSRF-Token` 头与 `manner_csrf` Cookie 一致。
+    // Bearer 认证（API 客户端，令牌本就在请求头中）不受 CSRF 约束。
+    if via_cookie {
+        let method = req.method().clone();
+        if method == axum::http::Method::POST
+            || method == axum::http::Method::PUT
+            || method == axum::http::Method::DELETE
+            || method == axum::http::Method::PATCH
+        {
+            let cookie_csrf = req
+                .headers()
+                .get("cookie")
+                .and_then(|h| h.to_str().ok())
+                .and_then(|cookie_header| {
+                    cookie_header.split(';').find_map(|part| {
+                        let part = part.trim();
+                        part.strip_prefix("manner_csrf=").map(|v| v.to_string())
+                    })
+                })
+                .unwrap_or_default();
+            let header_csrf = req
+                .headers()
+                .get("x-csrf-token")
+                .and_then(|h| h.to_str().ok())
+                .map(|v| v.trim().to_string())
+                .unwrap_or_default();
+            if cookie_csrf.is_empty() || header_csrf.is_empty() || cookie_csrf != header_csrf {
+                return Err(AppError::Forbidden);
+            }
+        }
+    }
+
     // F-08: 校验 token 版本号与数据库一致。改密/重置密码后 pwd_version 递增，
     // 旧 token 即使未过期也会在此被拒绝，实现「改密即全端失效」。
     // F-13: 同时校验账号状态。status=0（禁用/离职）后，其所有已签发 token 立即失效。
-    let account: Option<(i64, i8)> = sqlx::query_as(
-        "SELECT pwd_version, status FROM employees WHERE id = ?",
+    // 单设备登录：同一账号在别处重新登录会覆盖 employees.active_session，
+    // 本会话 sid 与之一致才放行，否则视为「已在其他设备登录」被踢下线。
+    let account: Option<(i64, i8, Option<String>)> = sqlx::query_as(
+        "SELECT pwd_version, status, active_session FROM employees WHERE id = ?",
     )
     .bind(&claims.sub)
     .fetch_optional(&state.pool)
     .await
     .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
 
-    let Some((stored_pwd_version, stored_status)) = account else {
+    let Some((stored_pwd_version, stored_status, active_session)) = account else {
         return Err(AppError::Unauthorized);
     };
 
     if stored_pwd_version != claims.pwd_version || stored_status != 1 {
         return Err(AppError::Unauthorized);
+    }
+
+    if let Some(active) = active_session {
+        if !active.is_empty() && active != claims.sid {
+            return Err(AppError::SessionExpired);
+        }
     }
 
     req.extensions_mut().insert(claims);

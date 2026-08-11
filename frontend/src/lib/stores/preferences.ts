@@ -131,8 +131,6 @@ function createPreferencesStore() {
   const initial = loadLocal()
   const { subscribe, set } = writable<Preferences>(initial)
 
-  let initialized = false
-
   function syncBackend(p: Preferences) {
     client.put('/auth/preferences', {
       preferences: {
@@ -142,6 +140,27 @@ function createPreferencesStore() {
         newConvPosition: p.newConvPosition,
       },
     }).catch(() => {})
+  }
+
+  /**
+   * 从服务端拉取当前登录用户的偏好并覆盖本地（偏好按「用户」存储于服务端，
+   * 而非按「设备」保存在 localStorage；登录成功后必须重新调用以拿到该用户的服务端偏好）。
+   */
+  async function refresh() {
+    try {
+      const res = await client.get<Record<string, unknown>>('/auth/preferences', undefined, { skipAuthRedirect: true })
+      // 401（未登录）时 client 返回 { code: 40002, data: null } 而非抛错，
+      // 此处必须跳过，否则会拿默认值覆盖本地已保存的偏好。
+      if (res.data == null) return
+      const next = normalizePrefs(res.data)
+      set(next)
+      globalPrefs = next
+      saveLocal(next)
+      notify()
+      applyTheme(next.theme)
+    } catch {
+      /* 未登录/接口失败：保持本地偏好 */
+    }
   }
 
   function update(partial: Partial<Preferences>) {
@@ -161,20 +180,9 @@ function createPreferencesStore() {
     async initialize() {
       applyTheme(initial.theme)
       globalPrefs = initial
-      if (initialized) return
-      initialized = true
-      try {
-        const res = await client.get<Record<string, unknown>>('/auth/preferences', undefined, { skipAuthRedirect: true })
-        const next = normalizePrefs(res.data)
-        set(next)
-        globalPrefs = next
-        saveLocal(next)
-        notify()
-        applyTheme(next.theme)
-      } catch {
-        /* 未登录/接口失败：保持本地偏好 */
-      }
+      await refresh()
     },
+    refresh,
     updateTheme: (theme: ThemeMode) => update({ theme }),
     updateTimezoneMode: (timezoneMode: TimezoneMode) => update({ timezoneMode }),
     updateTimezoneOffset: (timezoneOffset: number) => update({ timezoneOffset }),

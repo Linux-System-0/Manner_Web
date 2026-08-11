@@ -10,7 +10,9 @@ import type { Connect, Logger, Plugin } from 'vite'
  * 2. 强制仅绑定回环地址——任何 --host/HOST/server.host 试图绑定到非回环
  *    接口时直接拒绝启动，杜绝公网暴露后升级为高危；
  * 3. 剥离内联 sourcemap、折叠响应体与 HMR 错误浮层中的服务器绝对路径
- *    （保留文件名与行号，补丁本身不携带任何服务器路径）。
+ *    （保留文件名与行号，补丁本身不携带任何服务器路径）；
+ * 4. 将 SvelteKit dev 注入的 /@fs/<服务器绝对路径>/... 客户端入口改写为项目根
+ *    相对路径，消除浏览器端（Sources/Network）可见的绝对路径泄露。
  */
 
 /** 允许绑定的回环主机名/IP */
@@ -23,12 +25,16 @@ const collapsePaths = (text: string): string =>
 
 /** 本项目根目录绝对路径（仅服务端用于响应体清洗，不写入任何下发内容） */
 const ROOT_PATH = fileURLToPath(new URL('.', import.meta.url)).replace(/\/$/, '').replace(/\\/g, '/')
-const ROOT_PATH_RE = new RegExp(
-  // 负向断言 (?<!@fs)：SvelteKit dev HTML 内联脚本通过 /@fs/<绝对路径>/ 加载客户端
-  // 入口（Vite 标准机制），该路径必须原样下发；其余裸绝对路径仍清洗为 <project-root>。
-  `(?<!@fs)${ROOT_PATH.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`,
-  'g',
-)
+const ESCAPED_ROOT = ROOT_PATH.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const ROOT_PATH_RE = new RegExp(`(?<!@fs)${ESCAPED_ROOT}`, 'g')
+
+/**
+ * 匹配 Vite/SvelteKit dev 的 @fs 客户端入口 URL（如
+ * /@fs/home/ubuntu/Project/Manner_Web/frontend/.svelte-kit/generated/client/app.js）。
+ * SvelteKit 用 to_fs() 硬编码该入口，携带服务器绝对路径；统一改写为项目根相对路径
+ * /<rest>（根内文件本就由 Vite 以根相对 URL 提供），使浏览器端不再出现绝对路径。
+ */
+const FS_ROOT_RE = new RegExp(`/@fs${ESCAPED_ROOT}/`, 'g')
 
 /**
  * 强制回环绑定：CLI 的 --host、环境变量 HOST 会覆盖配置文件中的 server.host，
@@ -68,8 +74,9 @@ function refusePublicBind(): Plugin {
 function hideServerPaths(): Plugin {
   const JS_SOURCEMAP_RE = /[\r\n]+\/\/# sourceMappingURL=data:[^\r\n]*/g
   const CSS_SOURCEMAP_RE = /[\r\n]+\/\*# sourceMappingURL=data:[^\r\n]*\*\/[\r\n]*/g
-  // 不再拦截 @fs/：它是 Vite dev 的必需加载机制（本项目 SvelteKit 客户端入口即经
-  // /@fs/ 加载），访问边界已由 server.fs.strict + fs.deny 收敛；保留穿越与 ?raw 拦截。
+  // 不拦截 /@fs/ 本身（Vite dev 的必需加载机制），而是把其中携带的项目根绝对路径
+  // 改写为根相对 URL（见 FS_ROOT_RE），访问边界已由 server.fs.strict + fs.deny 收敛；
+  // 保留穿越与 ?raw 拦截。
   const SUSPICIOUS_RE = /(\.\.|\\|%5c|\?raw)/i
   const SENSITIVE_FILE_RE = /^\/(?:\.env(?:\.\w+)?|vite\.config\.|vitest\.config\.|svelte\.config\.|tsconfig|[^/]*\.(?:log|tsbuildinfo)$|package(?:-lock)?\.json$)/i
 
@@ -78,6 +85,7 @@ function hideServerPaths(): Plugin {
       return chunk
         .replace(JS_SOURCEMAP_RE, '')
         .replace(CSS_SOURCEMAP_RE, '')
+        .replace(FS_ROOT_RE, '/')
         .replace(ROOT_PATH_RE, '<project-root>')
     }
     if (chunk instanceof Uint8Array) {
@@ -85,6 +93,7 @@ function hideServerPaths(): Plugin {
       const cleaned = text
         .replace(JS_SOURCEMAP_RE, '')
         .replace(CSS_SOURCEMAP_RE, '')
+        .replace(FS_ROOT_RE, '/')
         .replace(ROOT_PATH_RE, '<project-root>')
       return cleaned !== text ? Buffer.from(cleaned) : chunk
     }
@@ -93,11 +102,11 @@ function hideServerPaths(): Plugin {
 
   const scrubError = (chunk: unknown): unknown => {
     if (typeof chunk === 'string') {
-      return collapsePaths(chunk.replace(ROOT_PATH_RE, '<project-root>'))
+      return collapsePaths(chunk.replace(FS_ROOT_RE, '/').replace(ROOT_PATH_RE, '<project-root>'))
     }
     if (chunk instanceof Uint8Array) {
       const text = Buffer.from(chunk).toString('utf8')
-      const cleaned = collapsePaths(text.replace(ROOT_PATH_RE, '<project-root>'))
+      const cleaned = collapsePaths(text.replace(FS_ROOT_RE, '/').replace(ROOT_PATH_RE, '<project-root>'))
       return cleaned !== text ? Buffer.from(cleaned) : chunk
     }
     return chunk
@@ -108,9 +117,15 @@ function hideServerPaths(): Plugin {
     configureServer(server) {
       server.middlewares.use((req: Connect.IncomingMessage, res, next) => {
         const rawUrl = req.url || ''
-        let decoded = rawUrl
+        // 先将 /@fs/<服务器绝对路径>/ 入口改写为项目根相对路径，保证后续 Vite
+        // 中间件按改写后的 URL 提供模块，浏览器端不再出现绝对路径。
+        if (FS_ROOT_RE.test(rawUrl)) {
+          const rewritten = rawUrl.replace(FS_ROOT_RE, '/')
+          req.url = rewritten
+        }
+        let decoded = req.url || ''
         try {
-          decoded = decodeURIComponent(rawUrl)
+          decoded = decodeURIComponent(decoded)
         } catch {
           /* malformed percent-encoding: use raw url */
         }

@@ -6,6 +6,22 @@ export async function getConversations(): Promise<ApiResponse<Conversation[]>> {
   return res
 }
 
+export async function createGroupConversation(
+  name: string,
+  memberIds: string[],
+): Promise<ApiResponse<Conversation>> {
+  const res = await client.post<Conversation>('/chat/conversations', { name, member_ids: memberIds })
+  return res
+}
+
+/** 获取或创建与指定员工的单聊会话（同一对用户只保留一个会话） */
+export async function getOrCreateDirectConversation(
+  peerId: string,
+): Promise<ApiResponse<Conversation>> {
+  const res = await client.get<Conversation>(`/chat/direct/${peerId}`)
+  return res
+}
+
 export async function getMessages(
   convId: string,
 ): Promise<ApiResponse<ChatMessage[]>> {

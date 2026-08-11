@@ -34,6 +34,16 @@ function isAuthEndpoint(url: string): boolean {
   return AUTH_ENDPOINTS.some((s) => url.includes(s))
 }
 
+/** 读取指定名称的 Cookie（双提交 CSRF 令牌）。 */
+function getCookie(name: string): string | null {
+  if (typeof document === 'undefined') return null
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const match = document.cookie.match(new RegExp('(?:^|; )' + escaped + '=([^;]*)'))
+  return match ? decodeURIComponent(match[1]) : null
+}
+
+const CSRF_METHODS = new Set(['POST', 'PUT', 'DELETE', 'PATCH'])
+
 let refreshing: Promise<boolean> | null = null
 
 async function tryRefresh(): Promise<boolean> {
@@ -89,6 +99,13 @@ async function doFetch(
     body = JSON.stringify(options.body)
   }
 
+  // F7: 双提交 CSRF——写请求附加 X-CSRF-Token（值与 manner_csrf Cookie 一致），
+  // 后端仅对「Cookie 认证 + 写方法」校验；无 csrf Cookie（如纯 Bearer 客户端）不附加。
+  const csrfToken = getCookie('manner_csrf')
+  if (csrfToken && CSRF_METHODS.has(method.toUpperCase())) {
+    headers['X-CSRF-Token'] = csrfToken
+  }
+
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
   try {
@@ -114,12 +131,27 @@ async function request<T>(
 
   // 401 且非认证端点自身、且未重放过：尝试静默续期后重放
   if (res.status === 401 && !retried && !isAuthEndpoint(url) && !options.skipAuthRedirect) {
+    // 读取响应体判断是否「已在其他设备登录」（同一账号在别处重新登录，本会话被踢下线）
+    let kickedElsewhere = false
+    try {
+      const body = (await res.clone().json()) as { code?: number } | null
+      kickedElsewhere = body?.code === 40010
+    } catch {
+      /* 响应体非 JSON 时忽略 */
+    }
     const refreshed = await tryRefresh()
     if (refreshed) {
       return request<T>(method, url, options, true)
     }
     // 续期失败：前端已无有效会话，强制回到登录页
     authStore.logout()
+    if (kickedElsewhere && typeof window !== 'undefined') {
+      try {
+        sessionStorage.setItem('manner-logout-reason', 'kicked')
+      } catch {
+        /* ignore */
+      }
+    }
     if (typeof window !== 'undefined') {
       window.location.href = '/login'
     }

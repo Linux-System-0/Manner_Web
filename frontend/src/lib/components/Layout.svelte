@@ -17,6 +17,7 @@
   import { getLoginPage } from '$lib/api/system'
   import { getEffectiveTheme, subscribe as subscribePrefs } from '$lib/stores/preferences'
   import { logout as logoutApi } from '$lib/api/auth'
+  import { setFavicon } from '$lib/utils/favicon'
 
   let { children }: { children: Snippet } = $props()
 
@@ -55,6 +56,7 @@
           siteTitle = t
           document.title = t
         }
+        setFavicon(res.data?.site_icon ? `/api/system/icon/site?v=${Date.now()}` : null)
       })
       .catch(() => {})
 
@@ -92,6 +94,9 @@
     ...(authStore.hasPermission('employee:list')
       ? [{ key: '/employees', label: '员工管理', icon: 'team' }]
       : []),
+    ...(authStore.hasPermission('department:list')
+      ? [{ key: '/departments', label: '部门管理', icon: 'idcard' }]
+      : []),
     { key: '/chat', label: '聊天', icon: 'message' },
     ...(authStore.hasPermission('system:settings')
       ? [{ key: '/logs', label: '应用日志', icon: 'file-text' }]
@@ -117,18 +122,23 @@
 </script>
 
 <div class="ant-layout" style="min-height:100vh;display:flex;flex-direction:row" data-theme={themeMode}>
-  <aside class="ant-layout-sider ant-layout-sider-dark" style="width:{collapsed ? 80 : siderWidth}px;min-width:{collapsed ? 80 : siderWidth}px;max-width:{collapsed ? 80 : siderWidth}px;background:var(--ant-layout-sider-bg);transition:all 0.2s;overflow:auto">
+  <aside
+    class="ant-layout-sider"
+    class:ant-layout-sider-dark={themeMode === 'dark'}
+    style="width:{collapsed ? 80 : siderWidth}px;min-width:{collapsed ? 80 : siderWidth}px;max-width:{collapsed ? 80 : siderWidth}px;background:var(--ant-layout-sider-bg);transition:all 0.2s;overflow:auto"
+  >
     <div
       bind:this={titleEl}
-      style="height:64px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:{collapsed ? 16 : 20}px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 16px"
+      style="height:64px;display:flex;align-items:center;justify-content:center;color:var(--ant-layout-sider-color);font-size:{collapsed ? 16 : 20}px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 16px"
     >
       {collapsed ? '' : siteTitle}
     </div>
     <Menu
       items={menuItems}
-      theme="dark"
+      theme={themeMode === 'dark' ? 'dark' : 'light'}
       selectedKeys={[selectedKey]}
       onClick={(key) => goto(key)}
+      collapsed={collapsed}
       style="border-right:none"
     />
   </aside>
@@ -137,7 +147,7 @@
       class="ant-layout-header"
       style="padding:0 24px;background:var(--ant-layout-header-bg);display:flex;align-items:center;justify-content:space-between;box-shadow:0 1px 4px rgba(0,0,0,0.08);height:64px;line-height:64px"
     >
-      <Button type="text" onClick={() => (collapsed = !collapsed)}>
+      <Button type="text" tooltip={collapsed ? '展开侧边菜单' : '收起侧边菜单'} tooltipPosition="right" onClick={() => (collapsed = !collapsed)}>
         <span style="display:inline-flex"><Icon name={collapsed ? 'menu-unfold' : 'menu-fold'} style="font-size:16px" /></span>
       </Button>
       <Dropdown items={userMenuItems} onClick={onUserMenu} placement="bottomRight">
@@ -151,7 +161,7 @@
     </header>
     <main
       class="ant-layout-content"
-      style="margin:24px;padding:24px;background:var(--ant-color-bg-container);border-radius:var(--ant-border-radius-lg);height:calc(100vh - 112px);overflow:hidden;display:flex;flex-direction:column"
+      style="margin:24px;padding:24px;background:var(--ant-layout-content-bg);border-radius:var(--ant-border-radius-lg);height:calc(100vh - 112px);overflow:hidden;display:flex;flex-direction:column"
     >
       {@render children()}
     </main>

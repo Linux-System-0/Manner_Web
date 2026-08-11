@@ -26,6 +26,12 @@ async fn main() {
 
     run_migrations(&pool).await;
 
+    // 敏感字段静态加密迁移：存量明文 → 密文（幂等，仅处理无 enc:v1: 前缀的字段）。
+    match crate::utils::crypto::migrate_sensitive_fields(&pool, &cfg.field_enc_key).await {
+        Ok(n) => tracing::info!(migrated = n, "敏感字段加密迁移完成"),
+        Err(e) => tracing::error!(error = ?e, "敏感字段加密迁移失败"),
+    }
+
     // F-01: 预生成与 BCRYPT_COST 同开销的假哈希，供登录「用户名不存在」分支做等时校验。
     let login_dummy_hash = crate::services::auth::hash_password(
         &uuid::Uuid::new_v4().to_string(),

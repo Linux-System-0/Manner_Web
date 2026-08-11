@@ -18,18 +18,37 @@ pub struct Config {
     pub login_lock_window_secs: u64,
     /// F15: 登录 Cookie 是否携带 Secure 标志（生产 HTTPS 时设为 true）。
     pub cookie_secure: bool,
+    /// 员工敏感字段静态加密密钥（SHA-256 派生为 32 字节 AES-256 密钥）。
+    /// 缺失/过短时拒绝启动或告警，见 security_warnings()。
+    pub field_enc_key: [u8; 32],
+    /// 可信反向代理 IP 白名单（单 IP 或 CIDR，逗号分隔）。
+    /// 仅当对端 IP 命中白名单时后端才信任 X-Real-IP / X-Forwarded-For，
+    /// 用于登录限流与审计日志解析真实客户端 IP；直连部署留空即可。
+    pub trusted_proxies: crate::utils::trusted_proxy::TrustedProxies,
 }
 
 pub const DEFAULT_JWT_SECRET: &str = "your-super-secret-key-change-in-production";
 
+/// .env.example 中的示例值。直接照搬示例配置会被拒绝启动，防止误用公开的示例凭据。
+pub const EXAMPLE_DATABASE_URL: &str = "mysql://manner:Change_Me_123@127.0.0.1:3306/manner_web";
+pub const EXAMPLE_JWT_SECRET: &str =
+    "CHANGE_ME_this_is_an_example_jwt_secret_please_generate_a_64_char_random_one";
+pub const EXAMPLE_FIELD_ENC_KEY: &str = "CHANGE_ME_example_field_enc_key_please_use_random";
+
 impl Config {
     pub fn from_env() -> Self {
         Self {
-            database_url: env::var("DATABASE_URL").expect("DATABASE_URL must be set"),
+            database_url: {
+                let url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+                if url == EXAMPLE_DATABASE_URL {
+                    panic!("DATABASE_URL 仍为 .env.example 示例值，拒绝启动：请配置真实数据库连接串");
+                }
+                url
+            },
             jwt_secret: {
                 let secret = env::var("JWT_SECRET").expect("JWT_SECRET must be set");
-                if secret == DEFAULT_JWT_SECRET {
-                    panic!("JWT_SECRET 仍为公开默认值，拒绝启动：请设置强随机密钥（建议 >=32 字符）");
+                if secret == DEFAULT_JWT_SECRET || secret == EXAMPLE_JWT_SECRET {
+                    panic!("JWT_SECRET 仍为公开默认值/示例值，拒绝启动：请设置强随机密钥（建议 >=32 字符）");
                 }
                 secret
             },
@@ -70,6 +89,17 @@ impl Config {
             cookie_secure: env::var("COOKIE_SECURE")
                 .map(|v| v == "true" || v == "1")
                 .unwrap_or(false),
+            field_enc_key: {
+                let key = env::var("FIELD_ENC_KEY")
+                    .expect("FIELD_ENC_KEY must be set（员工敏感字段加密密钥，建议 ≥32 字符强随机值）");
+                if key == EXAMPLE_FIELD_ENC_KEY {
+                    panic!("FIELD_ENC_KEY 仍为 .env.example 示例值，拒绝启动：请设置强随机密钥");
+                }
+                crate::utils::crypto::derive_key(&key)
+            },
+            trusted_proxies: crate::utils::trusted_proxy::TrustedProxies::parse(
+                &env::var("TRUSTED_PROXIES").unwrap_or_default(),
+            ),
         }
     }
 
@@ -96,6 +126,9 @@ impl Config {
             warnings.push(
                 "COOKIE_SECURE 未开启且服务非本机绑定：生产 HTTPS 部署必须设置 COOKIE_SECURE=true".to_string(),
             );
+        }
+        if self.field_enc_key == [0u8; 32] {
+            warnings.push("FIELD_ENC_KEY 派生为空密钥，请设置强随机值（建议 ≥32 字符）".to_string());
         }
         warnings
     }

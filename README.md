@@ -52,15 +52,17 @@ Manner_Web/
 | `LOGIN_MAX_FAILURES` | 5 | 登录限流阈值（系统设置可覆盖） |
 | `LOGIN_LOCK_WINDOW_SECS` | 900 | 限流窗口秒数（系统设置可覆盖） |
 | `COOKIE_SECURE` | false | Cookie `Secure` 属性；生产环境必须置 `true` |
+| `TRUSTED_PROXIES` | 空 | 可信反向代理 IP（单 IP 或 CIDR，逗号分隔）。经 Nginx 反代部署时填代理地址（如 `127.0.0.1`），后端才信任 `X-Real-IP` 解析真实客户端 IP；直连部署留空即忽略一切转发头 |
 | `PROFILE` | — | 设为 `production` 时启用 JSON 滚动日志 |
 
-> **注意**：`backend/.env` 已被 `.gitignore` 忽略，严禁提交到 git；生产环境建议改用环境变量注入。
+> **注意**：`backend/.env` 已被 `.gitignore` 忽略，严禁提交到 git；生产环境建议改用环境变量注入。使用环境变量注入是应注释掉 [main.rs](backend/main.rs) 的第 15 行防止遍历时遇到恶意文件被注入。
 
 ## 安全要点
 
 - **凭据治理**：`backend/.env` 不入库（`.gitignore` 已忽略）；生产环境用环境变量注入（systemd `Environment=` / Docker `-e` / K8s Secret）；`JWT_SECRET` 必须为强随机值（建议 ≥64 字符），生产环境 `COOKIE_SECURE=true`。
+- **反代部署**：经 Nginx 反代时必须设置 `TRUSTED_PROXIES=127.0.0.1`，后端才按真实来源 IP 做登录限流与审计（否则失败计数全站共享，5 次失败可能锁死全站登录）。
 - **密钥轮换**：任何密钥（`JWT_SECRET`、SSH 私钥等）疑似泄露时，立即轮换，并重写 git 历史清除残留（如 `git filter-repo`）。
-- 详细安全基线见 [docs/加密标准.md](docs/加密标准.md) 与 [docs/SECURITY.md](docs/SECURITY.md)。
+- 详细安全基线见 [加密标准.md](docs/加密标准.md) 与 [安全设计说明.md](docs/安全设计说明.md)。
 
 ## 本地开发
 

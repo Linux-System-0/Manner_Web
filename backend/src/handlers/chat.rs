@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::AppError;
-use crate::handlers::auth::{append_log, user_tag};
+use crate::handlers::auth::{append_log, user_tag, ClientIp};
 use crate::middleware::auth::{require_permission, AppState, AuthUser};
 use crate::utils::response::ApiResponse;
 
@@ -36,6 +36,8 @@ pub struct ConversationResponse {
     pub my_role: String,
     pub my_nickname: Option<String>,
     pub my_group_note: Option<String>,
+    /// 当前请求认证用户的 id（服务端身份，前端据此判断「自己/对方」，避免与前端本地状态不一致）
+    pub my_id: String,
 }
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
@@ -71,6 +73,8 @@ pub struct MessageResponse {
     pub file_url: Option<String>,
     pub file_name: Option<String>,
     pub created_at: NaiveDateTime,
+    /// 当前请求认证用户的 id（服务端身份，前端据此判断消息是否「自己发送」）
+    pub my_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -101,6 +105,12 @@ pub struct UpdateGroupNameRequest {
 #[derive(Debug, Deserialize)]
 pub struct AddParticipantRequest {
     pub employee_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateGroupRequest {
+    pub name: String,
+    pub member_ids: Vec<String>,
 }
 
 async fn get_participants(pool: &sqlx::MySqlPool, conv_id: &str) -> Vec<ParticipantInfo> {
@@ -177,13 +187,202 @@ pub async fn list_conversations(
             my_role,
             my_nickname,
             my_group_note,
+            my_id: auth.id.clone(),
         });
     }
 
     Ok(Json(ApiResponse::ok(result)))
 }
 
+/// 获取或创建与指定员工的单聊会话（同一对用户只保留一个会话，供「点击姓名发起聊天」使用）。
+pub async fn get_or_create_direct_conversation(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Path(peer_id): Path<String>,
+) -> Result<Json<ApiResponse<ConversationResponse>>, AppError> {
+    if peer_id == auth.id {
+        return Err(AppError::BadRequest("不能和自己聊天".to_string()));
+    }
+    let peer_exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM employees WHERE id = ?")
+        .bind(&peer_id)
+        .fetch_one(&state.pool)
+        .await?;
+    if peer_exists == 0 {
+        return Err(AppError::NotFound);
+    }
 
+    // 复用已存在的单聊会话；同一对用户只保留一个（按创建时间取最早，避免历史重复会话）。
+    let conv_id: Option<String> = sqlx::query_scalar(
+        "SELECT c.id FROM conversations c
+         WHERE c.type = 'single'
+           AND EXISTS (SELECT 1 FROM conversation_participants cp WHERE cp.conversation_id = c.id AND cp.employee_id = ?)
+           AND EXISTS (SELECT 1 FROM conversation_participants cp WHERE cp.conversation_id = c.id AND cp.employee_id = ?)
+         ORDER BY c.created_at ASC LIMIT 1",
+    )
+    .bind(&auth.id)
+    .bind(&peer_id)
+    .fetch_optional(&state.pool)
+    .await?;
+
+    let conv_id = match conv_id {
+        Some(id) => id,
+        None => {
+            let conv_id = Uuid::new_v4().to_string();
+            let mut tx = state.pool.begin().await?;
+            sqlx::query(
+                "INSERT INTO conversations (id, type, name, created_by) VALUES (?, 'single', NULL, ?)",
+            )
+            .bind(&conv_id)
+            .bind(&auth.id)
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query(
+                "INSERT INTO conversation_participants (conversation_id, employee_id, role) VALUES (?, ?, 'member'), (?, ?, 'member')",
+            )
+            .bind(&conv_id)
+            .bind(&auth.id)
+            .bind(&conv_id)
+            .bind(&peer_id)
+            .execute(&mut *tx)
+            .await?;
+            tx.commit().await?;
+            conv_id
+        }
+    };
+
+    let participants = get_participants(&state.pool, &conv_id).await;
+    let my_info = participants.iter().find(|p| p.id == auth.id);
+    let my_role = my_info.map(|p| p.role.clone().unwrap_or_default()).unwrap_or_default();
+    let my_nickname = my_info.and_then(|p| p.nickname.clone());
+    let my_group_note: Option<String> = sqlx::query_scalar(
+        "SELECT group_note FROM conversation_participants WHERE conversation_id = ? AND employee_id = ?",
+    )
+    .bind(&conv_id)
+    .bind(&auth.id)
+    .fetch_optional(&state.pool)
+    .await
+    .ok()
+    .flatten();
+
+    let last_message: Option<String> = sqlx::query_scalar(
+        "SELECT m.content FROM messages m WHERE m.conversation_id = ? ORDER BY m.created_at DESC LIMIT 1",
+    )
+    .bind(&conv_id)
+    .fetch_optional(&state.pool)
+    .await?;
+    let last_time: Option<NaiveDateTime> = sqlx::query_scalar(
+        "SELECT m.created_at FROM messages m WHERE m.conversation_id = ? ORDER BY m.created_at DESC LIMIT 1",
+    )
+    .bind(&conv_id)
+    .fetch_optional(&state.pool)
+    .await?;
+
+    Ok(Json(ApiResponse::ok(ConversationResponse {
+        id: conv_id,
+        r#type: "single".to_string(),
+        name: None,
+        created_by: Some(auth.id.clone()),
+        created_at: chrono::Utc::now().naive_utc(),
+        last_message,
+        last_time,
+        participants,
+        my_role,
+        my_nickname,
+        my_group_note,
+        my_id: auth.id,
+    })))
+}
+
+pub async fn create_group_conversation(
+    State(state): State<AppState>,
+    auth: AuthUser,
+    Json(body): Json<CreateGroupRequest>,
+) -> Result<Json<ApiResponse<ConversationResponse>>, AppError> {
+    require_permission(&auth.permissions, "chat:group_create")?;
+
+    // 群名校验：trim 后非空、≤128 字符（conversations.name VARCHAR(128)）
+    let name = body.name.trim();
+    if name.is_empty() {
+        return Err(AppError::BadRequest("群名不能为空".to_string()));
+    }
+    if name.chars().count() > 128 {
+        return Err(AppError::BadRequest("群名不能超过 128 个字符".to_string()));
+    }
+
+    // 成员去重、剔除创建者自己（创建者自动加入）；数量上限 100 防滥用
+    let mut member_ids: Vec<String> = Vec::new();
+    for id in &body.member_ids {
+        if id == &auth.id || member_ids.contains(id) {
+            continue;
+        }
+        member_ids.push(id.clone());
+    }
+    if member_ids.len() > 100 {
+        return Err(AppError::BadRequest("群聊成员数量不能超过 100 人".to_string()));
+    }
+
+    // 校验所有成员在 employees 表中存在（动态 IN 查询，防脏数据）
+    if !member_ids.is_empty() {
+        let sql = format!(
+            "SELECT id FROM employees WHERE id IN ({})",
+            vec!["?"; member_ids.len()].join(",")
+        );
+        let mut query = sqlx::query_scalar::<_, String>(&sql);
+        for id in &member_ids {
+            query = query.bind(id);
+        }
+        let found: Vec<String> = query.fetch_all(&state.pool).await?;
+        if found.len() != member_ids.len() {
+            return Err(AppError::BadRequest("包含无效成员".to_string()));
+        }
+    }
+
+    // 事务：创建会话 + 写入参与者（创建者为 admin，其余为 member）
+    let conv_id = Uuid::new_v4().to_string();
+    let mut tx = state.pool.begin().await?;
+    sqlx::query(
+        "INSERT INTO conversations (id, type, name, created_by) VALUES (?, 'group', ?, ?)",
+    )
+    .bind(&conv_id)
+    .bind(name)
+    .bind(&auth.id)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "INSERT INTO conversation_participants (conversation_id, employee_id, role) VALUES (?, ?, 'admin')",
+    )
+    .bind(&conv_id)
+    .bind(&auth.id)
+    .execute(&mut *tx)
+    .await?;
+    for id in &member_ids {
+        sqlx::query(
+            "INSERT INTO conversation_participants (conversation_id, employee_id, role) VALUES (?, ?, 'member')",
+        )
+        .bind(&conv_id)
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
+
+    let participants = get_participants(&state.pool, &conv_id).await;
+
+    Ok(Json(ApiResponse::ok(ConversationResponse {
+        id: conv_id,
+        r#type: "group".to_string(),
+        name: Some(name.to_string()),
+        created_by: Some(auth.id.clone()),
+        created_at: chrono::Utc::now().naive_utc(),
+        last_message: None,
+        last_time: None,
+        participants,
+        my_role: "admin".to_string(),
+        my_nickname: None,
+        my_group_note: None,
+        my_id: auth.id,
+    })))
+}
 
 pub async fn get_messages(
     State(state): State<AppState>,
@@ -260,6 +459,7 @@ pub async fn get_messages(
             file_url: row.file_url,
             file_name: row.file_name,
             created_at: row.created_at,
+            my_id: auth.id.clone(),
         });
     }
 
@@ -268,10 +468,12 @@ pub async fn get_messages(
 
 pub async fn send_message(
     State(state): State<AppState>,
+    client_ip: ClientIp,
     auth: AuthUser,
     Path(conv_id): Path<String>,
     Json(body): Json<SendMessageRequest>,
 ) -> Result<Json<ApiResponse<MessageResponse>>, AppError> {
+    let ip = client_ip.0;
     let is_member: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM conversation_participants WHERE conversation_id = ? AND employee_id = ?",
     )
@@ -316,6 +518,17 @@ pub async fn send_message(
     let msg_id = Uuid::new_v4().to_string();
     let msg_type = body.msg_type.as_deref().unwrap_or("text");
 
+    // 消息类型白名单（防任意字符串污染 type 列）
+    if msg_type != "text" && msg_type != "file" {
+        return Err(AppError::BadRequest("不支持的消息类型".to_string()));
+    }
+    // 消息内容长度上限（防单条消息撑爆 TEXT 列与内存）
+    if let Some(ref content) = body.content {
+        if content.chars().count() > 20_000 {
+            return Err(AppError::BadRequest("消息内容过长".to_string()));
+        }
+    }
+
     // F-10: 文件消息必须携带 file_url，且 file_url 必须指向本站 /uploads 下、扩展名合法的文件
     // （任意文件扩展名，与 /api/upload/file 上传白名单一致）。
     // 防止用户可控任意链接（钓鱼跳转、javascript: 伪协议等）通过文件消息传播。
@@ -337,6 +550,56 @@ pub async fn send_message(
             return Err(AppError::BadRequest(
                 "文件链接必须指向本站上传的文件".to_string(),
             ));
+        }
+        // F-6: 文件归属校验——文件若已被其他会话引用，发送者必须是相关会话的成员；
+        // 未被任何会话引用的（新上传）文件必须真实存在于上传目录。
+        // 防止「知晓 UUID 即可跨会话引用/传播他人文件」与「引用不存在的伪造路径」。
+        let referencing: Vec<String> = sqlx::query_scalar(
+            "SELECT DISTINCT conversation_id FROM messages WHERE file_url = ?",
+        )
+        .bind(url)
+        .fetch_all(&state.pool)
+        .await?;
+        if !referencing.is_empty() {
+            let mut allowed = false;
+            for cid in &referencing {
+                let n: i64 = sqlx::query_scalar(
+                    "SELECT COUNT(*) FROM conversation_participants WHERE conversation_id = ? AND employee_id = ?",
+                )
+                .bind(cid)
+                .bind(&auth.id)
+                .fetch_one(&state.pool)
+                .await?;
+                if n > 0 {
+                    allowed = true;
+                    break;
+                }
+            }
+            if !allowed {
+                return Err(AppError::Forbidden);
+            }
+        } else {
+            // 新上传文件：校验真实存在（chat/ 子目录优先，根目录兜底存量文件）。
+            // 与 get_chat_file 一致：路径任一级为软链接视为不存在（防符号链接逃逸引用）。
+            let name = url.trim_start_matches("/uploads/");
+            let chat_path =
+                std::path::Path::new(&state.config.upload_dir).join("chat").join(name);
+            let root_path = std::path::Path::new(&state.config.upload_dir).join(name);
+            let mut exists = false;
+            for cand in [&chat_path, &root_path] {
+                match tokio::fs::symlink_metadata(cand).await {
+                    Ok(m) if !m.file_type().is_symlink() => {
+                        exists = true;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            if !exists {
+                return Err(AppError::BadRequest(
+                    "文件不存在，请重新上传".to_string(),
+                ));
+            }
         }
     }
     if let Some(ref name) = body.file_name {
@@ -370,12 +633,21 @@ pub async fn send_message(
     let (sender_name, sender_avatar) = (sender_info.0, sender_info.1);
 
     let msg_preview = body.content.as_deref().unwrap_or("").chars().take(50).collect::<String>();
-    append_log(&state.config.log_file, &format!("用户 {} 在会话 {} 中发送了消息: {}", user_tag(&auth.name, &auth.username), conv_id, msg_preview));
+    append_log(
+        &state.config.log_file,
+        &format!(
+            "用户 {} 在会话 {} 中发送了消息: {}",
+            user_tag(&auth.name, &auth.username),
+            conv_id,
+            msg_preview
+        ),
+        &ip,
+    );
 
     Ok(Json(ApiResponse::ok(MessageResponse {
         id: msg_id,
         conversation_id: conv_id,
-        sender_id: auth.id,
+        sender_id: auth.id.clone(),
         sender_name,
         sender_avatar,
         r#type: msg_type.to_string(),
@@ -383,6 +655,7 @@ pub async fn send_message(
         file_url: body.file_url.clone(),
         file_name: body.file_name.clone(),
         created_at: chrono::Utc::now().naive_utc(),
+        my_id: auth.id,
     })))
 }
 
@@ -401,9 +674,11 @@ async fn resolve_employee_display(pool: &sqlx::Pool<sqlx::MySql>, id: &str) -> S
 
 pub async fn block_user(
     State(state): State<AppState>,
+    client_ip: ClientIp,
     auth: AuthUser,
     Json(body): Json<BlockRequest>,
 ) -> Result<Json<ApiResponse<()>>, AppError> {
+    let ip = client_ip.0;
     if body.blocked_id == auth.id {
         return Err(AppError::BadRequest("不能拉黑自己".to_string()));
     }
@@ -423,15 +698,25 @@ pub async fn block_user(
         .await?;
 
     let target = resolve_employee_display(&state.pool, &body.blocked_id).await;
-    append_log(&state.config.log_file, &format!("用户 {} 拉黑了用户 {}", user_tag(&auth.name, &auth.username), target));
+    append_log(
+        &state.config.log_file,
+        &format!(
+            "用户 {} 拉黑了用户 {}",
+            user_tag(&auth.name, &auth.username),
+            target
+        ),
+        &ip,
+    );
     Ok(Json(ApiResponse::ok_msg("已拉黑")))
 }
 
 pub async fn unblock_user(
     State(state): State<AppState>,
+    client_ip: ClientIp,
     auth: AuthUser,
     Path(blocked_id): Path<String>,
 ) -> Result<Json<ApiResponse<()>>, AppError> {
+    let ip = client_ip.0;
     sqlx::query("DELETE FROM blocked_users WHERE blocker_id = ? AND blocked_id = ?")
         .bind(&auth.id)
         .bind(&blocked_id)
@@ -439,7 +724,15 @@ pub async fn unblock_user(
         .await?;
 
     let target = resolve_employee_display(&state.pool, &blocked_id).await;
-    append_log(&state.config.log_file, &format!("用户 {} 取消了拉黑 {}", user_tag(&auth.name, &auth.username), target));
+    append_log(
+        &state.config.log_file,
+        &format!(
+            "用户 {} 取消了拉黑 {}",
+            user_tag(&auth.name, &auth.username),
+            target
+        ),
+        &ip,
+    );
     Ok(Json(ApiResponse::ok_msg("已取消拉黑")))
 }
 
@@ -580,8 +873,16 @@ pub async fn update_group_name(
     if !is_admin(&state.pool, &conv_id, &auth.id).await {
         return Err(AppError::Forbidden);
     }
+    // F-9: 与创建群聊一致的群名校验（trim 后非空、≤128 字符，与列宽一致）。
+    let name = body.name.trim();
+    if name.is_empty() {
+        return Err(AppError::BadRequest("群名不能为空".to_string()));
+    }
+    if name.chars().count() > 128 {
+        return Err(AppError::BadRequest("群名不能超过 128 个字符".to_string()));
+    }
     sqlx::query("UPDATE conversations SET name = ? WHERE id = ?")
-        .bind(&body.name)
+        .bind(name)
         .bind(&conv_id)
         .execute(&state.pool)
         .await?;
@@ -659,31 +960,6 @@ pub async fn disband_group(
         .await?;
 
     Ok(Json(ApiResponse::ok_msg("群聊已解散")))
-}
-
-pub async fn update_protect_block(
-    State(state): State<AppState>,
-    auth: AuthUser,
-    Path(emp_id): Path<String>,
-    Json(body): Json<serde_json::Value>,
-) -> Result<Json<ApiResponse<()>>, AppError> {
-    require_permission(&auth.permissions, "chat:protect_block")?;
-
-    let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM employees WHERE id = ?")
-        .bind(&emp_id)
-        .fetch_one(&state.pool)
-        .await?;
-    if exists == 0 {
-        return Err(AppError::NotFound);
-    }
-
-    let value = body.get("protect_block").and_then(|v| v.as_i64()).unwrap_or(0) as i8;
-    sqlx::query("UPDATE employees SET protect_block = ? WHERE id = ?")
-        .bind(value)
-        .bind(&emp_id)
-        .execute(&state.pool)
-        .await?;
-    Ok(Json(ApiResponse::ok_msg("已更新")))
 }
 
 /// F-24: 聊天文件下载接口（替代 /uploads 静态直链）。

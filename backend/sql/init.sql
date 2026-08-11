@@ -8,14 +8,17 @@ CREATE TABLE IF NOT EXISTS employees (
     password VARCHAR(255) NOT NULL,
     name VARCHAR(64) NOT NULL,
     title VARCHAR(64) DEFAULT NULL,
-    email VARCHAR(128) DEFAULT NULL,
-    phone VARCHAR(20) DEFAULT NULL,
-    id_number VARCHAR(18) DEFAULT NULL,
-    address VARCHAR(255) DEFAULT NULL,
+    -- 敏感字段：静态加密（AES-256-GCM）后落库，密文带 enc:v1: 前缀，列宽按密文预留
+    email VARCHAR(255) DEFAULT NULL,
+    phone VARCHAR(255) DEFAULT NULL,
+    id_number VARCHAR(255) DEFAULT NULL,
+    address TEXT DEFAULT NULL,
     hire_date DATE DEFAULT NULL,
     status TINYINT NOT NULL DEFAULT 1,
     pwd_version INT NOT NULL DEFAULT 0,
     must_change_password TINYINT NOT NULL DEFAULT 0,
+    -- 当前有效会话 id（单设备登录：新登录覆盖此值，旧设备令牌立即失效）
+    active_session VARCHAR(64) DEFAULT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     avatar VARCHAR(255) DEFAULT NULL,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -54,6 +57,7 @@ INSERT IGNORE INTO permissions (code, name, module) VALUES
 ('employee:edit',   '编辑员工',       'employee'),
 ('employee:delete', '删除员工',       'employee'),
 ('employee:password', '重置员工密码', 'employee'),
+('employee:view_sensitive', '查看敏感信息', 'employee'),
 ('chat:protect_block', '防拉黑保护', 'chat'),
 ('chat:group_create', '群聊创建', 'chat'),
 ('chat:upload', '上传文件', 'chat'),
@@ -62,6 +66,13 @@ INSERT IGNORE INTO permissions (code, name, module) VALUES
 
 ALTER TABLE employees ADD COLUMN protect_block TINYINT NOT NULL DEFAULT 0;
 ALTER TABLE employees ADD COLUMN preferences TEXT DEFAULT NULL AFTER protect_block;
+ALTER TABLE employees ADD COLUMN active_session VARCHAR(64) DEFAULT NULL;
+
+-- 敏感字段静态加密后落库：扩列宽以容纳 enc:v1: 密文（MODIFY 幂等，重复执行不报错）
+ALTER TABLE employees MODIFY COLUMN email VARCHAR(255) DEFAULT NULL;
+ALTER TABLE employees MODIFY COLUMN phone VARCHAR(255) DEFAULT NULL;
+ALTER TABLE employees MODIFY COLUMN id_number VARCHAR(255) DEFAULT NULL;
+ALTER TABLE employees MODIFY COLUMN address TEXT DEFAULT NULL;
 
 CREATE TABLE IF NOT EXISTS conversations (
     id CHAR(36) NOT NULL PRIMARY KEY,
@@ -116,3 +127,50 @@ CREATE TABLE IF NOT EXISTS blocked_users (
 DELETE FROM permissions WHERE code = 'employee:protect_block';
 INSERT IGNORE INTO permissions (code, name, module) VALUES ('chat:group_create', '群聊创建', 'chat');
 INSERT IGNORE INTO permissions (code, name, module) VALUES ('system:settings', '系统设置', 'system');
+
+-- 旧版本角色机制已移除：清理残留权限与废弃表（幂等，可重复执行）。
+-- 当前系统为「员工级直接授权 + 部门（多对多归属）」。
+DELETE FROM permissions WHERE module = 'role';
+DROP TABLE IF EXISTS role_department_scopes;
+DROP TABLE IF EXISTS role_permissions;
+DROP TABLE IF EXISTS employee_roles;
+DROP TABLE IF EXISTS roles;
+
+-- 部门表：支持父子层级（parent_id）与部门负责人（leader_id，指向 employees.id）。
+CREATE TABLE IF NOT EXISTS departments (
+    id CHAR(36) NOT NULL PRIMARY KEY,
+    name VARCHAR(64) NOT NULL,
+    parent_id CHAR(36) DEFAULT NULL,
+    leader_id CHAR(36) DEFAULT NULL,
+    sort_order INT NOT NULL DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_parent (parent_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 员工-部门多对多归属（一个员工可加入多个部门）。
+CREATE TABLE IF NOT EXISTS employee_departments (
+    employee_id CHAR(36) NOT NULL,
+    department_id CHAR(36) NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (employee_id, department_id),
+    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
+    FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 部门负责人多对多（一个部门可有多个负责人）。
+CREATE TABLE IF NOT EXISTS department_leaders (
+    department_id CHAR(36) NOT NULL,
+    employee_id CHAR(36) NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (department_id, employee_id),
+    FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE CASCADE,
+    FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT IGNORE INTO permissions (code, name, module) VALUES
+('department:list',   '查看部门列表',   'department'),
+('department:view',   '查看部门详情',   'department'),
+('department:create', '新增部门',       'department'),
+('department:edit',   '编辑部门',       'department'),
+('department:delete', '删除部门',       'department');

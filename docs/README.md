@@ -19,7 +19,7 @@
 | [前端开发指南](前端开发指南.md) | 前端技术栈、项目结构、开发命令、API 客户端、状态管理与组件库 |
 | [前端-SvelteKit-重构规范](前端-SvelteKit-重构规范.md) | SvelteKit 编码规范：组件/页面/API/状态/类型/质量门禁 |
 | [加密标准](加密标准.md) | 密码存储与传输、JWT 令牌、Cookie 属性、上传安全、安全响应头与凭据管理 |
-| [SECURITY](SECURITY.md) | 安全设计说明：认证/授权/传输/上传/配置安全与部署 checklist |
+| [安全设计说明](安全设计说明.md) | 安全设计说明：认证/授权/传输/上传/配置安全与部署 checklist |
 
 另有非 Markdown 文件 `docs/nginx-prod.conf.example`：生产 Nginx 反向代理配置示例（HTTPS、SPA fallback、`/api` 与 `/uploads` 反代、安全头）。
 
@@ -29,4 +29,4 @@
 - 想了解系统如何设计、各模块如何协作 → 阅读[架构设计](架构设计.md)
 - 对接接口、联调前端 → 阅读[API 文档](API文档.md)
 - 环境变量、本地开发与部署 → 参见[根 README](../README.md)
-- 安全基线、生产部署检查项 → 阅读[SECURITY](SECURITY.md) 与[加密标准](加密标准.md)
+- 安全基线、生产部署检查项 → 阅读[安全设计说明](安全设计说明.md) 与[加密标准](加密标准.md)

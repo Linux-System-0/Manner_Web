@@ -1,6 +1,7 @@
 <script lang="ts">
   // Button：复刻 antd 5 视觉（primary/default/dashed/text/link + danger + loading + block + size）
   import type { Snippet } from 'svelte'
+  import Tooltip from './Tooltip.svelte'
 
   let {
     type = 'default',
@@ -16,6 +17,8 @@
     class: className = '',
     style = '',
     title = '',
+    tooltip = '',
+    tooltipPosition = 'top',
   }: {
     type?: 'default' | 'primary' | 'dashed' | 'text' | 'link'
     size?: 'large' | 'middle' | 'small'
@@ -30,6 +33,9 @@
     class?: string
     style?: string
     title?: string
+    /** 鼠标悬停时显示的解释气泡文字 */
+    tooltip?: string
+    tooltipPosition?: 'top' | 'bottom' | 'left' | 'right'
   } = $props()
 
   let cls = $derived(
@@ -37,24 +43,32 @@
   )
 </script>
 
-<button
-  type={htmlType}
-  class={cls}
-  class:ant-btn-block={block}
-  {disabled}
-  {title}
-  style={style}
-  onclick={onClick}
->
-  {#if loading}
-    <span class="ant-btn-icon">
-      <span class="anticon anticon-spin" style="font-size:14px;line-height:0"><svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" focusable="false"><path d="M512 64a32 32 0 0122.6 54.6 32 32 0 01-45.3 0A32 32 0 01512 64zm0 768a32 32 0 0122.6 54.6 32 32 0 01-45.3 0A32 32 0 01512 832zM172 448a32 32 0 0122.6 54.6 32 32 0 01-45.3 0A32 32 0 01172 448zm680 0a32 32 0 0122.6 54.6 32 32 0 01-45.3 0A32 32 0 01852 448zM272 752a32 32 0 0122.6 54.6 32 32 0 01-45.3 0A32 32 0 01272 752zm480-480a32 32 0 0122.6 54.6 32 32 0 01-45.3 0A32 32 0 01752 272z" /></svg></span>
-    </span>
-  {:else if icon}
-    <span class="ant-btn-icon">{@render icon()}</span>
-  {/if}
-  {#if children}<span class="ant-btn-text">{@render children()}</span>{/if}
-</button>
+{#snippet btn()}
+  <button
+    type={htmlType}
+    class={cls}
+    class:ant-btn-block={block}
+    {disabled}
+    title={tooltip ? undefined : title}
+    style={style}
+    onclick={onClick}
+  >
+    {#if loading}
+      <span class="ant-btn-icon">
+        <span class="anticon anticon-spin" style="font-size:14px;line-height:0"><svg viewBox="64 64 896 896" width="1em" height="1em" fill="currentColor" focusable="false"><path d="M512 64a32 32 0 0122.6 54.6 32 32 0 01-45.3 0A32 32 0 01512 64zm0 768a32 32 0 0122.6 54.6 32 32 0 01-45.3 0A32 32 0 01512 832zM172 448a32 32 0 0122.6 54.6 32 32 0 01-45.3 0A32 32 0 01172 448zm680 0a32 32 0 0122.6 54.6 32 32 0 01-45.3 0A32 32 0 01852 448zM272 752a32 32 0 0122.6 54.6 32 32 0 01-45.3 0A32 32 0 01272 752zm480-480a32 32 0 0122.6 54.6 32 32 0 01-45.3 0A32 32 0 01752 272z" /></svg></span>
+      </span>
+    {:else if icon}
+      <span class="ant-btn-icon">{@render icon()}</span>
+    {/if}
+    {#if children}<span class="ant-btn-text">{@render children()}</span>{/if}
+  </button>
+{/snippet}
+
+{#if tooltip}
+  <Tooltip title={tooltip} position={tooltipPosition} block={block}>{@render btn()}</Tooltip>
+{:else}
+  {@render btn()}
+{/if}
 
 <style>
   .ant-btn {

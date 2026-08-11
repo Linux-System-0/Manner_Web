@@ -6,7 +6,7 @@
   // 视觉骨架（Sider/Header/Content/菜单）见 src/lib/components/Layout.svelte
   import type { Snippet } from 'svelte'
   import '../styles/global.css'
-  import { onMount } from 'svelte'
+  import { onMount, onDestroy } from 'svelte'
   import { page } from '$app/stores'
   import { goto } from '$app/navigation'
   import { authStore } from '$lib/stores/auth'
@@ -21,6 +21,29 @@
   let initialized = $state(false)
   let isLoginPage = $derived($page.url.pathname.startsWith('/login'))
 
+  let meTimer: ReturnType<typeof setInterval> | null = null
+  let lastUserId: string | null = null
+
+  // 会话身份对账：同浏览器（共享 cookie）登录第二个账号时，本页的 cookie
+  // 会被覆盖为「新账号」，但前端 authStore 仍停留在旧账号 → 出现「界面显示 A、
+  // 实际以 B 身份操作」的错乱。周期性以服务端 /auth/me 为准同步 authStore。
+  async function reconcileSession() {
+    try {
+      const res = await getMe()
+      if (res.code !== 0 || !res.data) return
+      if (lastUserId !== null && res.data.id !== lastUserId) {
+        // 身份已切换（同浏览器被另一账号覆盖）：更新本地登录态与偏好
+        authStore.setUser(res.data)
+        await preferencesStore.refresh()
+      } else if (lastUserId === null) {
+        authStore.setUser(res.data)
+      }
+      lastUserId = res.data.id
+    } catch {
+      // 401 时 client 已处理续期/登出跳转，此处无需处理
+    }
+  }
+
   onMount(async () => {
     authStore.restoreLocal()
     await preferencesStore.initialize()
@@ -34,12 +57,19 @@
     try {
       const res = await getMe()
       authStore.setUser(res.data)
+      lastUserId = res.data.id
     } catch {
       // 无有效会话 → 回登录页（replace 避免历史栈污染）
       goto('/login', { replaceState: true })
     } finally {
       initialized = true
     }
+
+    meTimer = setInterval(() => void reconcileSession(), 30000)
+  })
+
+  onDestroy(() => {
+    if (meTimer) clearInterval(meTimer)
   })
 </script>
 

@@ -92,7 +92,7 @@
 
   <div>
     <Title level={5}>时区</Title>
-    <Space direction="vertical" style="width:100%">
+    <Space direction="vertical" style="width:100%" align="start">
       <Radio
         options={[
           { value: 'system', label: getSystemTzLabel() },

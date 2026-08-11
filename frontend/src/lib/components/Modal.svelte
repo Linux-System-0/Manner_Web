@@ -59,7 +59,7 @@
       <div class="ant-modal" role="dialog" aria-modal="true" style="width:{typeof width === 'number' ? width + 'px' : width}">
         <div class="ant-modal-content">
           {#if closable}
-            <button class="ant-modal-close" aria-label="关闭" onclick={onclose}>
+            <button class="ant-modal-close" title="关闭" aria-label="关闭" onclick={onclose}>
               <span class="ant-modal-close-x"><Icon name="close" /></span>
             </button>
           {/if}
@@ -75,8 +75,8 @@
             <div class="ant-modal-footer">{@render footer()}</div>
           {:else if onOk}
             <div class="ant-modal-footer">
-              <Button onClick={onclose}>{cancelText}</Button>
-              <Button type="primary" danger={okDanger} loading={confirmLoading} onClick={onOk}>{okText}</Button>
+              <Button tooltip="关闭弹窗，不保存修改" onClick={onclose}>{cancelText}</Button>
+              <Button type="primary" danger={okDanger} loading={confirmLoading} tooltip="确认当前操作" onClick={onOk}>{okText}</Button>
             </div>
           {/if}
         </div>
@@ -132,6 +132,9 @@
     box-shadow: var(--ant-box-shadow);
     pointer-events: auto;
     color: var(--ant-color-text);
+    display: flex;
+    flex-direction: column;
+    max-height: calc(100vh - 200px);
   }
   .ant-modal-close {
     position: absolute;
@@ -174,6 +177,7 @@
     font-size: 14px;
     line-height: 1.5715;
     word-wrap: break-word;
+    overflow-y: auto;
   }
   .ant-modal-footer {
     padding: 10px 16px;
@@ -192,6 +196,26 @@
     to {
       opacity: 1;
       transform: scale(1) translateY(0);
+    }
+  }
+
+  /* 自适应：小屏下弹窗铺满可用宽度并上下居中，内容超高时内部滚动 */
+  @media (max-width: 768px) {
+    .ant-modal-wrap {
+      padding: 24px 16px;
+      align-items: center;
+    }
+    .ant-modal {
+      width: 100% !important;
+      max-width: calc(100vw - 32px);
+    }
+    .ant-modal-content {
+      max-height: calc(100vh - 48px);
+    }
+    .ant-modal-header,
+    .ant-modal-body {
+      padding-left: 16px;
+      padding-right: 16px;
     }
   }
 

@@ -97,6 +97,7 @@ body {
 
   /* 布局组件专用 */
   --ant-layout-sider-bg: #001529;
+  --ant-layout-sider-color: rgba(255, 255, 255, 0.85);
   --ant-layout-header-bg: #141414;
   --ant-layout-header-color: rgba(255, 255, 255, 0.85);
   --ant-layout-content-bg: #141414;
@@ -105,6 +106,7 @@ body {
   --ant-menu-dark-item-selected-color: #ffffff;
   --ant-menu-dark-item-color: rgba(255, 255, 255, 0.65);
   --ant-menu-dark-item-hover-color: #ffffff;
+  --ant-menu-light-item-selected-bg: #1d1d1d;
 
   /* 组件暗色覆盖（原 global.css 覆盖值） */
   --ant-card-bg: #141414;
@@ -180,15 +182,17 @@ body {
   --ant-font-weight-strong: 600;
 
   /* 布局组件专用 */
-  --ant-layout-sider-bg: #001529;
+  --ant-layout-sider-bg: #ffffff;
+  --ant-layout-sider-color: rgba(0, 0, 0, 0.88);
   --ant-layout-header-bg: #ffffff;
   --ant-layout-header-color: rgba(0, 0, 0, 0.88);
-  --ant-layout-content-bg: #ffffff;
+  --ant-layout-content-bg: #f5f5f5;
   --ant-menu-dark-bg: #001529;
   --ant-menu-dark-item-selected-bg: #1677ff;
   --ant-menu-dark-item-selected-color: #ffffff;
   --ant-menu-dark-item-color: rgba(255, 255, 255, 0.65);
   --ant-menu-dark-item-hover-color: #ffffff;
+  --ant-menu-light-item-selected-bg: #e6f4ff;
 
   /* 组件覆盖（antd 默认） */
   --ant-card-bg: #ffffff;
@@ -229,6 +233,10 @@ body {
 
 [data-theme='dark'] .ant-card {
   background: #141414;
+}
+
+[data-theme='light'] .ant-layout-sider {
+  border-right: 1px solid #f0f0f0;
 }
 
 [data-theme='dark'] .ant-table-thead > tr > th {

@@ -6,11 +6,13 @@
   import { authStore } from '$lib/stores/auth'
   import { getApiError } from '$lib/api/client'
   import { getEmployee, updateEmployee } from '$lib/api/employees'
+  import { getDepartments, updateEmployeeDepartments } from '$lib/api/departments'
   import Card from '$lib/components/Card.svelte'
   import Form from '$lib/components/Form.svelte'
   import FormItem from '$lib/components/FormItem.svelte'
   import Input from '$lib/components/Input.svelte'
   import DatePicker from '$lib/components/DatePicker.svelte'
+  import Select from '$lib/components/Select.svelte'
   import Button from '$lib/components/Button.svelte'
   import Spin from '$lib/components/Spin.svelte'
   import Result from '$lib/components/Result.svelte'
@@ -35,6 +37,13 @@
   let idNumber = $state('')
   let address = $state('')
   let hireDate = $state('')
+  let departmentIds = $state<string[]>([])
+  let deptOptions = $state<{ value: string; label: string }[]>([])
+  // 敏感字段原始掩码（判断是否修改：未修改则跳过提交，后端保留原密文）
+  let origEmail = ''
+  let origPhone = ''
+  let origIdNumber = ''
+  let origAddress = ''
   let loading = $state(true)
   let submitting = $state(false)
 
@@ -60,11 +69,16 @@
         username = emp.username
         name = emp.name || ''
         title = emp.title || ''
+        origEmail = emp.email || ''
+        origPhone = emp.phone || ''
+        origIdNumber = emp.id_number || ''
+        origAddress = emp.address || ''
         email = emp.email || ''
         phone = emp.phone || ''
         idNumber = emp.id_number || ''
         address = emp.address || ''
         hireDate = emp.hire_date || ''
+        departmentIds = emp.department_ids || []
       } catch (err: unknown) {
         message.error(getApiError(err, '获取员工信息失败'))
         goto('/employees')
@@ -73,6 +87,14 @@
       }
     }
     fetchEmployee()
+
+    getDepartments()
+      .then((res) => {
+        if (res.code === 0) {
+          deptOptions = res.data.items.map((d) => ({ value: d.id, label: d.name }))
+        }
+      })
+      .catch(() => {})
   })
 
   function validate(): boolean {
@@ -92,14 +114,21 @@
       const res = await updateEmployee(ensureId(), {
         name: name.trim(),
         title: title.trim() || undefined,
-        email: email.trim() || undefined,
-        phone: phone.trim() || undefined,
-        id_number: idNumber.trim() || undefined,
-        address: address.trim() || undefined,
+        // 敏感字段未修改（仍为原始掩码 ***）则不提交，后端保留原密文
+        email: email.trim() === origEmail ? undefined : email.trim() || undefined,
+        phone: phone.trim() === origPhone ? undefined : phone.trim() || undefined,
+        id_number: idNumber.trim() === origIdNumber ? undefined : idNumber.trim() || undefined,
+        address: address.trim() === origAddress ? undefined : address.trim() || undefined,
         hire_date: hireDate || undefined,
       })
       if (res.code !== 0) {
         message.error(res.message || '更新失败')
+        return
+      }
+      // 归属部门独立更新（多对多整体替换）
+      const deptRes = await updateEmployeeDepartments(ensureId(), departmentIds)
+      if (deptRes.code !== 0) {
+        message.error(deptRes.message || '归属部门更新失败')
         return
       }
       message.success('更新成功')
@@ -115,13 +144,19 @@
 {#if !$authStore.permissions.includes('employee:edit')}
   <Result status="403" title="403" subTitle="抱歉，你无权访问该页面">
     {#snippet extra()}
-      <Button type="primary" onClick={() => goto('/employees')}>返回列表</Button>
+      <Button type="primary" tooltip="返回员工列表页" onClick={() => goto('/employees')}>返回列表</Button>
     {/snippet}
   </Result>
 {:else}
   <div style="height:100%;overflow:auto">
     <Spin spinning={loading}>
       <Card title="编辑员工" style="max-width:800px">
+        <div
+          style="margin-bottom:16px;padding:8px 12px;border:1px solid #ffd591;border-radius:6px;background:#fff7e6;color:#d46b08;font-size:13px;line-height:1.6"
+        >
+          手机号 / 邮箱 / 身份证号 / 地址已加密存储，此处仅显示掩码（***）。如需修改请重新输入；
+          未改动的字段将保留原值，不会被覆盖。
+        </div>
         <Form class="ant-form-vertical" onSubmit={(e) => { e.preventDefault(); handleSubmit() }}>
           <FormItem label="用户名" required={true} error={errors.username}>
             <Input
@@ -190,10 +225,20 @@
             />
           </FormItem>
 
+          <FormItem label="归属部门" error={errors.department_ids}>
+            <Select
+              value={departmentIds as never[]}
+              options={deptOptions}
+              multiple={true}
+              placeholder="可选择多个部门"
+              onChange={(v) => (departmentIds = (Array.isArray(v) ? v : []) as string[])}
+            />
+          </FormItem>
+
           <FormItem label="">
             <div style="display:flex;gap:12px">
-              <Button type="primary" htmlType="submit" loading={submitting}>保存</Button>
-              <Button onClick={() => goto('/employees')}>取消</Button>
+              <Button type="primary" htmlType="submit" loading={submitting} tooltip="保存对员工信息的修改">保存</Button>
+              <Button tooltip="放弃修改，返回员工列表" onClick={() => goto('/employees')}>取消</Button>
             </div>
           </FormItem>
         </Form>

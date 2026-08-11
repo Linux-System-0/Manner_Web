@@ -5,7 +5,7 @@ export interface User {
   id: string
   username: string
   name: string
-  email: string
+  email: string | null
   title: string | null
   phone: string | null
   avatar: string | null
@@ -19,16 +19,32 @@ export interface Employee {
   username: string
   name: string
   title: string | null
-  email: string
-  phone: string
-  id_number: string
-  address: string
+  /** 敏感字段：后端静态加密，API 仅返回全掩脱敏值（*** 或 null） */
+  email: string | null
+  phone: string | null
+  id_number: string | null
+  address: string | null
   avatar: string | null
   hire_date: string
   status: number
   protect_block: number
   permissions?: string[]
+  /** 归属部门 id 列表（多对多） */
+  department_ids?: string[]
+  /** 归属部门名称（逗号/顿号分隔，列表接口返回） */
+  departments?: string | null
   created_at: string
+}
+
+/** 查看敏感信息解密结果（仅 employee:view_sensitive 权限可获取，强制记录日志） */
+export interface SensitiveEmployeeInfo {
+  id: string
+  username: string
+  name: string
+  email: string | null
+  phone: string | null
+  id_number: string | null
+  address: string | null
 }
 
 export interface Permission {
@@ -98,6 +114,7 @@ export interface EmployeeQueryParams {
   page_size?: number
   keyword?: string
   status?: number
+  department_id?: string
 }
 
 export interface PrecheckRequest {
@@ -138,6 +155,8 @@ export interface Conversation {
   my_role: string
   my_nickname: string | null
   my_group_note: string | null
+  /** 服务端认证的当前用户 id（用于判断「自己/对方」，避免与前端本地状态不一致） */
+  my_id: string
 }
 
 export interface ChatMessage {
@@ -151,6 +170,33 @@ export interface ChatMessage {
   file_url: string | null
   file_name: string | null
   created_at: string
+  /** 服务端认证的当前用户 id（用于判断消息是否「自己发送」） */
+  my_id: string
+}
+
+// ---- 部门模块 ----
+
+export interface Department {
+  id: string
+  name: string
+  parent_id: string | null
+  /** 负责人姓名（顿号分隔） */
+  leader_names: string | null
+  /** 负责人 id 列表 */
+  leader_ids?: string[]
+  member_count: number
+  sort_order: number
+}
+
+export interface DepartmentMember {
+  id: string
+  username: string
+  name: string
+  title: string | null
+  avatar: string | null
+  status: number
+  /** 1 = 本部门负责人，0 = 普通成员 */
+  is_leader: number
 }
 
 // ---- 系统模块 ----
@@ -159,6 +205,8 @@ export interface LoginPageInfo {
   login_site_title?: string
   login_theme?: 'light' | 'dark' | 'system'
   site_title?: string
+  login_site_icon?: string
+  site_icon?: string
   registration_open?: boolean
 }
 

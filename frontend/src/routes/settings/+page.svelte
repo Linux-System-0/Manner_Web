@@ -3,7 +3,7 @@
   // 权限守卫：system:settings（403 Result，文案同原 ProtectedRoute）
   import { onMount } from 'svelte'
   import { authStore } from '$lib/stores/auth'
-  import { getSystemSettings, updateSystemSettings } from '$lib/api/system'
+  import { getSystemSettings, updateSystemSettings, uploadImage } from '$lib/api/system'
   import { getApiError } from '$lib/api/client'
   import { message } from '$lib/components/message'
   import Card from '$lib/components/Card.svelte'
@@ -17,6 +17,7 @@
   import Space from '$lib/components/Space.svelte'
   import Result from '$lib/components/Result.svelte'
   import Title from '$lib/components/Title.svelte'
+  import Upload from '$lib/components/Upload.svelte'
 
   const units = ['B', 'KB', 'MB', 'GB', 'TB', '无限制', '禁止']
 
@@ -40,6 +41,8 @@
   let loginTheme = $state('system')
   let siteTitle = $state('')
   let loginSiteTitle = $state('')
+  let loginSiteIcon = $state('')
+  let siteIcon = $state('')
   let maxFailures = $state('5')
   let lockWindow = $state('900')
   let saving = $state(false)
@@ -49,6 +52,8 @@
     loginTheme: 'system',
     siteTitle: '',
     loginSiteTitle: '',
+    loginSiteIcon: '',
+    siteIcon: '',
     maxFailures: '5',
     lockWindow: '900',
   })
@@ -61,6 +66,8 @@
       loginTheme !== orig.loginTheme ||
       siteTitle !== orig.siteTitle ||
       loginSiteTitle !== orig.loginSiteTitle ||
+      loginSiteIcon !== orig.loginSiteIcon ||
+      siteIcon !== orig.siteIcon ||
       maxFailures !== orig.maxFailures ||
       lockWindow !== orig.lockWindow,
   )
@@ -82,6 +89,8 @@
       siteTitle = title
       const loginTitle = String(data.login_site_title || '')
       loginSiteTitle = loginTitle
+      loginSiteIcon = String(data.login_site_icon || '')
+      siteIcon = String(data.site_icon || '')
       const mf = String(data.login_max_failures || '5')
       maxFailures = mf
       const lw = String(data.login_lock_window_secs || '900')
@@ -91,6 +100,8 @@
         loginTheme: theme,
         siteTitle: title,
         loginSiteTitle: loginTitle,
+        loginSiteIcon,
+        siteIcon,
         maxFailures: mf,
         lockWindow: lw,
       }
@@ -128,16 +139,23 @@
         login_theme: loginTheme,
         site_title: siteTitle,
         login_site_title: loginSiteTitle,
+        login_site_icon: loginSiteIcon,
+        site_icon: siteIcon,
         login_max_failures: maxFailures,
         login_lock_window_secs: lockWindow,
       })
       const titleChanged =
-        siteTitle !== orig.siteTitle || loginSiteTitle !== orig.loginSiteTitle
+        siteTitle !== orig.siteTitle ||
+        loginSiteTitle !== orig.loginSiteTitle ||
+        loginSiteIcon !== orig.loginSiteIcon ||
+        siteIcon !== orig.siteIcon
       orig = {
         uploadLimit: uploadVal,
         loginTheme,
         siteTitle,
         loginSiteTitle,
+        loginSiteIcon,
+        siteIcon,
         maxFailures,
         lockWindow,
       }
@@ -150,106 +168,184 @@
     }
     saving = false
   }
+
+  async function handleLoginIconUpload(file: File) {
+    try {
+      const url = await uploadImage(file)
+      loginSiteIcon = url
+      message.success('登录页图标已上传，点击确认保存')
+    } catch (err: unknown) {
+      message.error(getApiError(err, '上传失败'))
+    }
+  }
+
+  async function handleSiteIconUpload(file: File) {
+    try {
+      const url = await uploadImage(file)
+      siteIcon = url
+      message.success('登录后图标已上传，点击确认保存')
+    } catch (err: unknown) {
+      message.error(getApiError(err, '上传失败'))
+    }
+  }
 </script>
 
-{#if !allowed}
-  <Result status="403" title="403" subTitle="抱歉，您没有访问此页面的权限。">
-    {#snippet extra()}
-      <Button type="primary" onClick={() => window.history.back()}>返回</Button>
-    {/snippet}
-  </Result>
-{:else}
-  <Card title="系统设置">
-    {#snippet extra()}
-      <Tooltip title={changed ? undefined : '没有更改'}>
-        <Button type="primary" loading={saving} onClick={handleSave} disabled={!changed}>
-          确认
-        </Button>
-      </Tooltip>
-    {/snippet}
-    <Form>
-      <div style="margin-bottom:24px">
-        <Title level={5}>聊天文件上传大小限制</Title>
-        <Space>
-          {#if !hideInput}
-            <Input
-              value={size}
-              onInput={(v) => (size = v)}
-              placeholder="请输入大小"
-              style="width:160px"
+<div style="height:100%;overflow:auto">
+  {#if !allowed}
+    <Result status="403" title="403" subTitle="抱歉，您没有访问此页面的权限。">
+      {#snippet extra()}
+        <Button type="primary" tooltip="返回上一页" onClick={() => window.history.back()}>返回</Button>
+      {/snippet}
+    </Result>
+  {:else}
+    <Card title="系统设置">
+      {#snippet extra()}
+        <Tooltip title={changed ? '保存并应用修改后的系统设置' : '没有更改'}>
+          <Button type="primary" loading={saving} onClick={handleSave} disabled={!changed} tooltip={undefined}>
+            确认
+          </Button>
+        </Tooltip>
+      {/snippet}
+      <Form>
+        <div style="margin-bottom:24px">
+          <Title level={5}>聊天文件上传大小限制</Title>
+          <Space>
+            {#if !hideInput}
+              <Input
+                value={size}
+                onInput={(v) => (size = v)}
+                placeholder="请输入大小"
+                style="width:160px"
+              />
+            {/if}
+            <Select
+              value={unit}
+              onChange={(v) => (unit = String(v))}
+              width="120px"
+              options={units.map((u) => ({ value: u, label: u }))}
             />
-          {/if}
-          <Select
-            value={unit}
-            onChange={(v) => (unit = String(v))}
-            width="120px"
-            options={units.map((u) => ({ value: u, label: u }))}
+          </Space>
+        </div>
+  
+        <Divider />
+  
+        <div style="margin-bottom:24px">
+          <Title level={5}>登录页的网站标题</Title>
+          <Input
+            value={loginSiteTitle}
+            onInput={(v) => (loginSiteTitle = v)}
+            placeholder="例如：企业管理系统"
+            style="width:300px"
           />
-        </Space>
-      </div>
-
-      <Divider />
-
-      <div style="margin-bottom:24px">
-        <Title level={5}>登录页的网站标题</Title>
-        <Input
-          value={loginSiteTitle}
-          onInput={(v) => (loginSiteTitle = v)}
-          placeholder="例如：企业管理系统"
-          style="width:300px"
-        />
-      </div>
-
-      <Divider />
-
-      <div style="margin-bottom:24px">
-        <Title level={5}>登录后的网站标题</Title>
-        <Input
-          value={siteTitle}
-          onInput={(v) => (siteTitle = v)}
-          placeholder="例如：企业管理系统"
-          style="width:300px"
-        />
-      </div>
-
-      <Divider />
-
-      <div style="margin-bottom:24px">
-        <Title level={5}>登录页面主题</Title>
-        <Radio
-          options={themeOptions}
-          value={loginTheme}
-          onChange={(v) => (loginTheme = String(v))}
-        />
-      </div>
-
-      <Divider />
-
-      <div style="margin-bottom:24px">
-        <Title level={5}>登录安全限制</Title>
-        <div style="display:flex;flex-direction:column;gap:12px">
-          <div style="display:flex;align-items:center;gap:12px">
-            <span style="width:140px;flex-shrink:0">失败次数上限</span>
-            <Input
-              value={maxFailures}
-              onInput={(v) => (maxFailures = v)}
-              placeholder="1~100"
-              style="width:120px;flex-shrink:0"
-            />
-            <span style="color:#999">次（同一 IP 或用户名在窗口内失败达上限即锁定）</span>
-          </div>
-          <div style="display:flex;align-items:center;gap:12px">
-            <span style="width:140px;flex-shrink:0">锁定窗口</span>
-            <Input
-              value={lockWindow}
-              onInput={(v) => (lockWindow = v)}
-              placeholder="1~86400"
-              style="width:120px;flex-shrink:0"
-            />
-            <span style="color:#999">秒（保存后立即生效，无需重启）</span>
+        </div>
+  
+        <Divider />
+  
+        <div style="margin-bottom:24px">
+          <Title level={5}>登录页的网站图标（仅在浏览器标签页标题旁显示）</Title>
+          <Space>
+            <Upload
+              accept="image/*"
+              beforeUpload={(file) => {
+                handleLoginIconUpload(file)
+                return false
+              }}
+            >
+              <Button tooltip="选择图片文件作为登录页图标">上传图标</Button>
+            </Upload>
+            {#if loginSiteIcon}
+              <img
+                src={`/api/system/icon/login?v=${Date.now()}`}
+                alt="登录页图标"
+                style="width:24px;height:24px;object-fit:contain;border:1px solid var(--ant-color-border);border-radius:4px"
+              />
+              <Button type="text" tooltip="清除已上传的登录页图标" onClick={() => (loginSiteIcon = '')}>清除</Button>
+            {/if}
+          </Space>
+          <div style="color:#999;font-size:12px;margin-top:8px">
+            支持 png / jpg / jpeg / gif / webp / bmp / ico，仅用于浏览器标签页标题旁的图标
           </div>
         </div>
-      </div>
-    </Form>
-  </Card>
-{/if}
+  
+        <Divider />
+  
+        <div style="margin-bottom:24px">
+          <Title level={5}>登录后的网站标题</Title>
+          <Input
+            value={siteTitle}
+            onInput={(v) => (siteTitle = v)}
+            placeholder="例如：企业管理系统"
+            style="width:300px"
+          />
+        </div>
+  
+        <Divider />
+  
+        <div style="margin-bottom:24px">
+          <Title level={5}>登录后的网站图标（仅在浏览器标签页标题旁显示）</Title>
+          <Space>
+            <Upload
+              accept="image/*"
+              beforeUpload={(file) => {
+                handleSiteIconUpload(file)
+                return false
+              }}
+            >
+              <Button tooltip="选择图片文件作为登录后的网站图标">上传图标</Button>
+            </Upload>
+            {#if siteIcon}
+              <img
+                src={`/api/system/icon/site?v=${Date.now()}`}
+                alt="登录后图标"
+                style="width:24px;height:24px;object-fit:contain;border:1px solid var(--ant-color-border);border-radius:4px"
+              />
+              <Button type="text" tooltip="清除已上传的登录后网站图标" onClick={() => (siteIcon = '')}>清除</Button>
+            {/if}
+          </Space>
+          <div style="color:#999;font-size:12px;margin-top:8px">
+            支持 png / jpg / jpeg / gif / webp / bmp / ico，仅用于浏览器标签页标题旁的图标
+          </div>
+        </div>
+  
+        <Divider />
+  
+        <div style="margin-bottom:24px">
+          <Title level={5}>登录页面主题</Title>
+          <Radio
+            options={themeOptions}
+            value={loginTheme}
+            onChange={(v) => (loginTheme = String(v))}
+          />
+        </div>
+  
+        <Divider />
+  
+        <div style="margin-bottom:24px">
+          <Title level={5}>登录安全限制</Title>
+          <div style="display:flex;flex-direction:column;gap:12px">
+            <div style="display:flex;align-items:center;gap:12px">
+              <span style="width:140px;flex-shrink:0">失败次数上限</span>
+              <Input
+                value={maxFailures}
+                onInput={(v) => (maxFailures = v)}
+                placeholder="1~100"
+                style="width:120px;flex-shrink:0"
+              />
+              <span style="color:#999">次（同一 IP 或用户名在窗口内失败达上限即锁定）</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px">
+              <span style="width:140px;flex-shrink:0">锁定窗口</span>
+              <Input
+                value={lockWindow}
+                onInput={(v) => (lockWindow = v)}
+                placeholder="1~86400"
+                style="width:120px;flex-shrink:0"
+              />
+              <span style="color:#999">秒（保存后立即生效，无需重启）</span>
+            </div>
+          </div>
+        </div>
+      </Form>
+    </Card>
+  {/if}
+</div>

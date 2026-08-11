@@ -1,11 +1,14 @@
-use axum::extract::{Multipart, Query, State};
+use axum::body::Body;
+use axum::extract::{Multipart, Path, Query, State};
+use axum::http::header;
+use axum::response::Response;
 use axum::Json;
 use serde::Deserialize;
 use std::time::Duration;
 use uuid::Uuid;
 
 use crate::error::AppError;
-use crate::handlers::auth::{append_log, user_tag};
+use crate::handlers::auth::{append_log, user_tag, ClientIp};
 use crate::middleware::auth::{require_permission, AppState, AuthUser};
 use crate::models::employee::{Permission, PermissionInfo, PermissionModule};
 use crate::utils::response::ApiResponse;
@@ -16,6 +19,8 @@ pub struct SettingsBody {
     pub login_theme: Option<String>,
     pub site_title: Option<String>,
     pub login_site_title: Option<String>,
+    pub login_site_icon: Option<String>,
+    pub site_icon: Option<String>,
     pub login_max_failures: Option<String>,
     pub login_lock_window_secs: Option<String>,
 }
@@ -58,7 +63,7 @@ pub struct LogQuery {
     pub lines: Option<usize>,
 }
 
-fn is_allowed_extension(ext: &str) -> bool {
+pub(crate) fn is_allowed_extension(ext: &str) -> bool {
     ALLOWED_UPLOAD_EXTS.iter().any(|e| *e == ext)
 }
 
@@ -151,6 +156,7 @@ async fn save_upload(
     auth: &AuthUser,
     multipart: &mut Multipart,
     image_only: bool,
+    ip: &str,
 ) -> Result<Json<ApiResponse<String>>, AppError> {
     let limit: Option<String> = sqlx::query_scalar(
         "SELECT setting_value FROM system_settings WHERE setting_key = 'chat_upload_limit'",
@@ -162,7 +168,7 @@ async fn save_upload(
     let max_bytes = limit.as_deref().and_then(parse_size_limit);
 
     if max_bytes == Some(0) {
-        append_log(&state.config.log_file, &format!("用户 {} 上传文件失败: 上传已被管理员禁止", user_tag(&auth.name, &auth.username)));
+        append_log(&state.config.log_file, &format!("用户 {} 上传文件失败: 上传已被管理员禁止", user_tag(&auth.name, &auth.username)), ip);
         return Err(AppError::BadRequest("文件上传已被管理员禁止".to_string()));
     }
 
@@ -190,7 +196,7 @@ async fn save_upload(
             is_uploadable_extension(&ext)
         };
         if !ext_ok {
-            append_log(&state.config.log_file, &format!("用户 {} 上传文件 {} 失败: 文件类型不受支持 ({})", user_tag(&auth.name, &auth.username), file_name, ext));
+            append_log(&state.config.log_file, &format!("用户 {} 上传文件 {} 失败: 文件类型不受支持 ({})", user_tag(&auth.name, &auth.username), file_name, ext), ip);
             return Err(AppError::BadRequest(format!(
                 "不支持的文件类型: {}", ext
             )));
@@ -216,7 +222,7 @@ async fn save_upload(
         // 图片类一律校验魔数（防伪装扩展名，例如把 HTML 改名 .png）；
         // 非图片类型不校验（其安全由静态目录守卫强制下载兜底）。
         if is_allowed_extension(&ext) && !has_valid_magic(&data, &ext) {
-            append_log(&state.config.log_file, &format!("用户 {} 上传文件 {} 失败: 文件内容与声明类型不符", user_tag(&auth.name, &auth.username), file_name));
+            append_log(&state.config.log_file, &format!("用户 {} 上传文件 {} 失败: 文件内容与声明类型不符", user_tag(&auth.name, &auth.username), file_name), ip);
             return Err(AppError::BadRequest(
                 "文件内容与声明类型不符".to_string(),
             ));
@@ -225,7 +231,7 @@ async fn save_upload(
         if let Some(max) = max_bytes {
             if data.len() > max {
                 let limit_display = limit.clone().unwrap_or_else(|| max.to_string());
-                append_log(&state.config.log_file, &format!("用户 {} 上传文件 {} 失败: 文件大小超过限制 ({})", user_tag(&auth.name, &auth.username), file_name, limit_display));
+                append_log(&state.config.log_file, &format!("用户 {} 上传文件 {} 失败: 文件大小超过限制 ({})", user_tag(&auth.name, &auth.username), file_name, limit_display), ip);
                 return Err(AppError::BadRequest(format!(
                     "文件大小超过限制 ({})", limit_display
                 )));
@@ -233,11 +239,11 @@ async fn save_upload(
         }
 
         tokio::fs::write(&path, &data).await.map_err(|e| {
-            append_log(&state.config.log_file, &format!("用户 {} 上传文件 {} 失败: 写入失败 - {}", user_tag(&auth.name, &auth.username), file_name, e));
+            append_log(&state.config.log_file, &format!("用户 {} 上传文件 {} 失败: 写入失败 - {}", user_tag(&auth.name, &auth.username), file_name, e), ip);
             AppError::Internal(anyhow::anyhow!("Failed to write upload file: {}", e))
         })?;
 
-        append_log(&state.config.log_file, &format!("用户 {} 上传文件成功: {} ({} bytes, {})", user_tag(&auth.name, &auth.username), file_name, data.len(), new_name));
+        append_log(&state.config.log_file, &format!("用户 {} 上传文件成功: {} ({} bytes, {})", user_tag(&auth.name, &auth.username), file_name, data.len(), new_name), ip);
         let url = if image_only {
             format!("/uploads/{}", new_name)
         } else {
@@ -252,29 +258,35 @@ async fn save_upload(
 /// 图片上传（头像等）：仅允许图片白名单 + 魔数校验。
 pub async fn upload(
     State(state): State<AppState>,
+    client_ip: ClientIp,
     auth: AuthUser,
     mut multipart: Multipart,
 ) -> Result<Json<ApiResponse<String>>, AppError> {
-    save_upload(&state, &auth, &mut multipart, true).await
+    let ip = client_ip.0;
+    save_upload(&state, &auth, &mut multipart, true, &ip).await
 }
 
 /// 任意文件上传（聊天文件）：允许任意合法扩展名，图片类仍做魔数校验。
 pub async fn upload_file(
     State(state): State<AppState>,
+    client_ip: ClientIp,
     auth: AuthUser,
     mut multipart: Multipart,
 ) -> Result<Json<ApiResponse<String>>, AppError> {
+    let ip = client_ip.0;
     // F-17: 聊天文件上传需要 chat:upload 权限码（admin 角色默认拥有，
     // 普通角色需管理员在角色管理中授予），避免任意认证用户滥用上传面。
     require_permission(&auth.permissions, "chat:upload")?;
-    save_upload(&state, &auth, &mut multipart, false).await
+    save_upload(&state, &auth, &mut multipart, false, &ip).await
 }
 
 pub async fn update_settings(
     State(state): State<AppState>,
+    client_ip: ClientIp,
     auth: AuthUser,
     Json(body): Json<SettingsBody>,
 ) -> Result<Json<ApiResponse<()>>, AppError> {
+    let ip = client_ip.0;
     require_permission(&auth.permissions, "system:settings")?;
 
     let current: std::collections::HashMap<String, String> = sqlx::query_as::<_, (String, String)>(
@@ -303,6 +315,8 @@ pub async fn update_settings(
     save_setting(&state.pool, &current, "login_theme", body.login_theme.clone(), &mut changes, "登录主题").await?;
     save_setting(&state.pool, &current, "site_title", body.site_title.clone(), &mut changes, "登录后网站标题").await?;
     save_setting(&state.pool, &current, "login_site_title", body.login_site_title.clone(), &mut changes, "登录页网站标题").await?;
+    save_setting(&state.pool, &current, "login_site_icon", body.login_site_icon.clone(), &mut changes, "登录页网站图标").await?;
+    save_setting(&state.pool, &current, "site_icon", body.site_icon.clone(), &mut changes, "登录后网站图标").await?;
 
     // 登录限流参数:数值校验(1~100 次 / 1~86400 秒),合法才入库。
     if let Some(ref v) = body.login_max_failures {
@@ -348,7 +362,7 @@ pub async fn update_settings(
     }
 
     if !changes.is_empty() {
-        append_log(&state.config.log_file, &format!("用户 {} 修改了系统设置: {}", user_tag(&auth.name, &auth.username), changes.join(", ")));
+        append_log(&state.config.log_file, &format!("用户 {} 修改了系统设置: {}", user_tag(&auth.name, &auth.username), changes.join(", ")), &ip);
     }
     Ok(Json(ApiResponse::ok_msg("保存成功")))
 }
@@ -380,7 +394,8 @@ pub async fn get_login_page_settings(
 ) -> Result<Json<ApiResponse<serde_json::Value>>, AppError> {
     let rows: Vec<(String, String)> = sqlx::query_as(
         "SELECT setting_key, setting_value FROM system_settings \
-         WHERE setting_key IN ('login_site_title','login_theme','site_title')",
+         WHERE setting_key IN ('login_site_title','login_theme','site_title',\
+         'login_site_icon','site_icon')",
     )
     .fetch_all(&state.pool)
     .await
@@ -409,6 +424,81 @@ pub async fn get_login_page_settings(
     );
 
     Ok(Json(ApiResponse::ok(serde_json::Value::Object(map))))
+}
+
+/// 公开图标服务：按 key 返回登录页（login）/ 登录后（site）的网站图标文件字节。
+/// 未配置时返回 404。安全要点：
+/// - 仅允许从 system_settings 中读取配置的路径（不可任意指定文件）；
+/// - 仅允许扩展名白名单（与静态目录守卫一致），且校验魔数防伪造；
+/// - 仅限 upload_dir 根目录文件，禁止子目录/路径穿越。
+pub async fn get_site_icon(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+) -> Result<Response, AppError> {
+    let setting_key = match key.as_str() {
+        "login" => "login_site_icon",
+        "site" => "site_icon",
+        _ => return Err(AppError::NotFound),
+    };
+
+    let url: Option<String> = sqlx::query_scalar(
+        "SELECT setting_value FROM system_settings WHERE setting_key = ?",
+    )
+    .bind(setting_key)
+    .fetch_optional(&state.pool)
+    .await?;
+
+    let Some(url) = url else {
+        return Err(AppError::NotFound);
+    };
+
+    // 仅接受 /uploads/<file> 形式（上传接口产物），防止任意文件读取。
+    let Some(rel) = url.strip_prefix("/uploads/") else {
+        return Err(AppError::NotFound);
+    };
+    if rel.is_empty() || rel.contains('/') || rel.contains('\\') || rel.contains("..") {
+        return Err(AppError::NotFound);
+    }
+
+    let ext = std::path::Path::new(rel)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .unwrap_or_default();
+    if !is_allowed_extension(&ext) {
+        return Err(AppError::NotFound);
+    }
+
+    let path = std::path::Path::new(&state.config.upload_dir).join(rel);
+    // F-25: 软链接逃逸防护——目标为符号链接时拒绝读取。
+    if let Ok(m) = tokio::fs::symlink_metadata(&path).await {
+        if m.file_type().is_symlink() {
+            return Err(AppError::NotFound);
+        }
+    }
+
+    let data = tokio::fs::read(&path).await.map_err(|_| AppError::NotFound)?;
+
+    // 魔数校验：防止把非图片内容伪装成图标（与上传侧一致）。
+    if !has_valid_magic(&data, &ext) {
+        return Err(AppError::NotFound);
+    }
+
+    let content_type = match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "bmp" => "image/bmp",
+        "ico" => "image/x-icon",
+        _ => "application/octet-stream",
+    };
+
+    Response::builder()
+        .header(header::CONTENT_TYPE, content_type)
+        .header(header::CACHE_CONTROL, "public, max-age=300")
+        .body(Body::from(data))
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("Failed to build icon response: {}", e)))
 }
 
 pub async fn logs(
@@ -482,6 +572,7 @@ pub async fn list_permissions(
             current_module = Some(perm.module.clone());
             module_name = match perm.module.as_str() {
                 "employee" => "员工管理".to_string(),
+                "department" => "部门管理".to_string(),
                 "system" => "系统设置".to_string(),
                 "chat" => "聊天".to_string(),
                 _ => perm.module.clone(),

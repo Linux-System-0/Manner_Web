@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod chat;
+pub mod department;
 pub mod employee;
 pub mod system;
 
@@ -8,7 +9,7 @@ use axum::body::Body;
 use axum::extract::{DefaultBodyLimit, State};
 use axum::http::Method;
 use axum::http::StatusCode;
-use axum::http::header::{HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_DISPOSITION, CONTENT_TYPE};
+use axum::http::header::{HeaderName, HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_DISPOSITION, CONTENT_TYPE};
 use axum::http::{Request};
 use axum::middleware::Next;
 use axum::response::Response;
@@ -124,7 +125,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/auth/precheck", post(auth::precheck))
         .route("/api/auth/first-login", post(auth::first_login))
         .route("/api/auth/refresh", post(auth::refresh))
-        .route("/api/system/login-page", get(system::get_login_page_settings));
+        .route("/api/system/login-page", get(system::get_login_page_settings))
+        .route("/api/system/icon/:key", get(system::get_site_icon));
 
     let protected_routes = Router::new()
         .route("/api/system/health", get(system::health))
@@ -139,14 +141,24 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/employees/:id", get(employee::get_employee))
         .route("/api/employees/:id", put(employee::update_employee))
         .route("/api/employees/:id", delete(employee::delete_employee))
+        .route("/api/employees/:id/sensitive", post(employee::view_sensitive_info))
+        .route("/api/employees/:id/sensitive/:field", post(employee::view_sensitive_field))
         .route("/api/employees/:id/password", put(employee::reset_password))
         .route("/api/employees/:id/permissions", put(employee::update_employee_permissions))
+        .route("/api/employees/:id/departments", put(department::update_employee_departments))
+        .route("/api/departments", get(department::list_departments))
+        .route("/api/departments", post(department::create_department))
+        .route("/api/departments/:id", put(department::update_department))
+        .route("/api/departments/:id", delete(department::delete_department))
+        .route("/api/departments/:id/members", get(department::list_department_members))
         .route("/api/permissions", get(system::list_permissions))
         .route("/api/upload", post(system::upload).layer(DefaultBodyLimit::max(104_857_600)))
         .route("/api/upload/file", post(system::upload_file).layer(DefaultBodyLimit::max(104_857_600)))
         .route("/api/system/logs", get(system::logs))
         .route("/api/system/settings", put(system::update_settings))
         .route("/api/chat/conversations", get(chat::list_conversations))
+        .route("/api/chat/conversations", post(chat::create_group_conversation))
+        .route("/api/chat/direct/:peer_id", get(chat::get_or_create_direct_conversation))
         .route("/api/chat/conversations/:id/messages", get(chat::get_messages))
         .route("/api/chat/conversations/:id/messages", post(chat::send_message))
         .route("/api/chat/conversations/:id/name", put(chat::update_group_name))
@@ -159,7 +171,6 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/chat/blocked", get(chat::list_blocked))
         .route("/api/chat/employees", get(chat::list_employees_for_chat))
         .route("/api/chat/file/:name", get(chat::get_chat_file))
-        .route("/api/employees/:id/protect-block", put(chat::update_protect_block))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             crate::middleware::auth::auth_middleware,
@@ -182,7 +193,12 @@ pub fn build_router(state: AppState) -> Router {
             Method::DELETE,
             Method::OPTIONS,
         ]))
-        .allow_headers(AllowHeaders::list([CONTENT_TYPE, ACCEPT, AUTHORIZATION]));
+        .allow_headers(AllowHeaders::list([
+            CONTENT_TYPE,
+            ACCEPT,
+            AUTHORIZATION,
+            HeaderName::from_static("x-csrf-token"),
+        ]));
 
     let upload_dir = state.config.upload_dir.clone();
 

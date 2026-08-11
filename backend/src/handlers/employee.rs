@@ -4,14 +4,63 @@ use sqlx::QueryBuilder;
 use uuid::Uuid;
 
 use crate::error::AppError;
+use crate::handlers::auth::{append_log, user_tag, ClientIp};
 use crate::middleware::auth::{require_permission, AppState, AuthUser};
 use crate::models::employee::{
     EmployeeDetail, EmployeeListParams, EmployeeListResponse, EmployeeListRow, NewEmployee,
-    ResetPasswordRequest, UpdateEmployee, UpdateEmployeePermissionsRequest,
+    ResetPasswordRequest, SensitiveEmployeeInfo, UpdateEmployee,
+    UpdateEmployeePermissionsRequest,
 };
-use crate::handlers::auth::{append_log, user_tag};
 use crate::services::auth::hash_password;
+use crate::utils::crypto;
 use crate::utils::response::ApiResponse;
+
+/// 解密单个敏感字段：无前缀视为存量明文（迁移兜底），带前缀则严格解密。
+fn decrypt_field(v: Option<String>, key: &[u8; 32]) -> Result<Option<String>, AppError> {
+    match v {
+        None => Ok(None),
+        Some(s) => {
+            if s.starts_with(crypto::ENC_PREFIX) {
+                crypto::try_decrypt_field(&s, key)
+            } else {
+                Ok(Some(s))
+            }
+        }
+    }
+}
+
+/// 加密单个敏感字段：空串/空白转为 NULL，非空加密为密文。
+fn encrypt_field_opt(v: Option<String>, key: &[u8; 32]) -> Result<Option<String>, AppError> {
+    match v {
+        None => Ok(None),
+        Some(s) if s.trim().is_empty() => Ok(None),
+        Some(s) => crypto::encrypt_field(s.trim(), key).map(Some),
+    }
+}
+
+/// 头像 URL 白名单校验：仅接受本站上传接口产物 `/uploads/<uuid>.<图片扩展名>`。
+/// 防止任意字符串（javascript: 等伪协议、外部 URL、含路径分隔符的穿越串）写入 avatar。
+fn is_valid_avatar_url(url: &str) -> bool {
+    let Some(rel) = url.strip_prefix("/uploads/") else {
+        return false;
+    };
+    if rel.is_empty() || rel.contains('/') || rel.contains('\\') || rel.contains("..") {
+        return false;
+    }
+    let Some(ext) = std::path::Path::new(rel)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+    else {
+        return false;
+    };
+    if !crate::handlers::system::is_allowed_extension(&ext) {
+        return false;
+    }
+    // 文件名须为服务端生成的 UUID（36 字符，字母数字 + 连字符）
+    let stem = rel.strip_suffix(&format!(".{ext}")).unwrap_or(rel);
+    stem.len() == 36 && stem.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+}
 
 pub async fn list_employees(
     State(state): State<AppState>,
@@ -29,27 +78,40 @@ pub async fn list_employees(
         QueryBuilder::new("SELECT COUNT(*) FROM employees e WHERE 1=1");
     let mut query_qb: QueryBuilder<'_, sqlx::MySql> = QueryBuilder::new(
         "SELECT e.id, e.username, e.name, e.title, e.email, e.phone, e.id_number, \
-         e.address, e.avatar, e.hire_date, e.status, e.protect_block, e.created_at, e.updated_at \
+         e.address, e.avatar, e.hire_date, e.status, e.protect_block, e.created_at, \
+         (SELECT GROUP_CONCAT(d.name ORDER BY d.sort_order, d.created_at SEPARATOR '、') \
+          FROM employee_departments ed JOIN departments d ON d.id = ed.department_id \
+          WHERE ed.employee_id = e.id) AS departments \
          FROM employees e \
          WHERE 1=1",
     );
 
     if let Some(ref keyword) = params.keyword {
         let kw = format!("%{}%", keyword);
-        count_qb.push(" AND (e.name LIKE ");
+        // 敏感字段已静态加密（不可模糊查询），搜索仅支持 姓名/用户名。
+        count_qb.push(" AND (e.username LIKE ");
         count_qb.push_bind(kw.clone());
-        count_qb.push(" OR e.email LIKE ");
-        count_qb.push_bind(kw.clone());
-        count_qb.push(" OR e.phone LIKE ");
+        count_qb.push(" OR e.name LIKE ");
         count_qb.push_bind(kw.clone());
         count_qb.push(")");
 
-        query_qb.push(" AND (e.name LIKE ");
+        query_qb.push(" AND (e.username LIKE ");
         query_qb.push_bind(kw.clone());
-        query_qb.push(" OR e.email LIKE ");
-        query_qb.push_bind(kw.clone());
-        query_qb.push(" OR e.phone LIKE ");
+        query_qb.push(" OR e.name LIKE ");
         query_qb.push_bind(kw);
+        query_qb.push(")");
+    }
+
+    // 按部门过滤：员工须属于该部门（多对多任意一个匹配即可）。
+    if let Some(ref dept_id) = params.department_id {
+        let dq = " AND EXISTS (SELECT 1 FROM employee_departments ed \
+                   WHERE ed.employee_id = e.id AND ed.department_id = ";
+        count_qb.push(dq);
+        count_qb.push_bind(dept_id);
+        count_qb.push(")");
+
+        query_qb.push(dq);
+        query_qb.push_bind(dept_id);
         query_qb.push(")");
     }
 
@@ -67,6 +129,18 @@ pub async fn list_employees(
         .build_query_as()
         .fetch_all(&state.pool)
         .await?;
+
+    // 敏感字段全掩脱敏：密文与明文一律不返回，前端仅见 "***"。
+    let rows = rows
+        .into_iter()
+        .map(|mut r| {
+            r.email = crypto::mask_field(r.email);
+            r.phone = crypto::mask_field(r.phone);
+            r.id_number = crypto::mask_field(r.id_number);
+            r.address = crypto::mask_field(r.address);
+            r
+        })
+        .collect();
 
     Ok(Json(ApiResponse::ok(EmployeeListResponse {
         items: rows,
@@ -103,23 +177,141 @@ pub async fn get_employee(
     .fetch_all(&state.pool)
     .await?;
 
+    let department_ids: Vec<String> = sqlx::query_scalar(
+        "SELECT department_id FROM employee_departments WHERE employee_id = ?",
+    )
+    .bind(&id)
+    .fetch_all(&state.pool)
+    .await?;
+
     Ok(Json(ApiResponse::ok(EmployeeDetail {
         id: row.id,
         username: row.username,
         name: row.name,
         title: row.title,
-        email: row.email,
-        phone: row.phone,
-        id_number: row.id_number,
-        address: row.address,
+        email: crypto::mask_field(row.email),
+        phone: crypto::mask_field(row.phone),
+        id_number: crypto::mask_field(row.id_number),
+        address: crypto::mask_field(row.address),
         avatar: row.avatar,
         hire_date: row.hire_date,
         status: row.status,
         protect_block: row.protect_block,
         permissions,
+        department_ids,
         created_at: row.created_at,
         updated_at: row.updated_at,
     })))
+}
+
+/// 查看员工敏感信息（解密明文）。
+///
+/// 安全约束：
+/// - 必须持有 `employee:view_sensitive` 权限（身份由鉴权中间件校验）；
+/// - 每次调用强制写入业务日志（manner.log，经 /api/system/logs 可见）：
+///   记录操作者身份、被查看员工与访问 IP，实现可审计；
+/// - 前端须先经两次确认（操作入口弹窗 + 查看按钮弹窗）才允许调用本接口。
+pub async fn view_sensitive_info(
+    State(state): State<AppState>,
+    client_ip: ClientIp,
+    auth: AuthUser,
+    Path(id): Path<String>,
+) -> Result<Json<ApiResponse<SensitiveEmployeeInfo>>, AppError> {
+    require_permission(&auth.permissions, "employee:view_sensitive")?;
+
+    let ip = client_ip.0;
+
+    let row = sqlx::query_as::<_, EmployeeDetailRow>(
+        "SELECT e.id, e.username, e.name, e.title, e.email, e.phone, e.id_number, \
+         e.address, e.avatar, e.hire_date, e.status, e.protect_block, e.created_at, e.updated_at \
+         FROM employees e \
+         WHERE e.id = ?",
+    )
+    .bind(&id)
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or(AppError::NotFound)?;
+
+    let key = &state.config.field_enc_key;
+    let email = decrypt_field(row.email, key)?;
+    let phone = decrypt_field(row.phone, key)?;
+    let id_number = decrypt_field(row.id_number, key)?;
+    let address = decrypt_field(row.address, key)?;
+
+    // 严格审计：记录操作者、被查看员工与访问 IP，杜绝无痕访问。
+    append_log(
+        &state.config.log_file,
+        &format!(
+            "【敏感信息】用户 {} 查看了员工 {} (id={}) 的完整信息",
+            user_tag(&auth.name, &auth.username),
+            user_tag(&row.name, &row.username),
+            row.id
+        ),
+        &ip,
+    );
+
+    Ok(Json(ApiResponse::ok(SensitiveEmployeeInfo {
+        id: row.id,
+        username: row.username,
+        name: row.name,
+        email,
+        phone,
+        id_number,
+        address,
+    })))
+}
+
+/// 查看员工敏感信息中的单个字段（解密明文），供前端逐字段「显示」按钮调用。
+///
+/// 安全约束与 `view_sensitive_info` 一致，但日志更细粒度：记录具体查看的是哪个字段
+/// （邮箱/手机号/身份证号/地址），并追加访问 IP。
+pub async fn view_sensitive_field(
+    State(state): State<AppState>,
+    client_ip: ClientIp,
+    auth: AuthUser,
+    Path((id, field)): Path<(String, String)>,
+) -> Result<Json<ApiResponse<serde_json::Value>>, AppError> {
+    require_permission(&auth.permissions, "employee:view_sensitive")?;
+
+    let ip = client_ip.0;
+
+    let row = sqlx::query_as::<_, EmployeeDetailRow>(
+        "SELECT e.id, e.username, e.name, e.title, e.email, e.phone, e.id_number, \
+         e.address, e.avatar, e.hire_date, e.status, e.protect_block, e.created_at, e.updated_at \
+         FROM employees e \
+         WHERE e.id = ?",
+    )
+    .bind(&id)
+    .fetch_optional(&state.pool)
+    .await?
+    .ok_or(AppError::NotFound)?;
+
+    let key = &state.config.field_enc_key;
+    let (value, label) = match field.as_str() {
+        "email" => (decrypt_field(row.email, key)?, "邮箱"),
+        "phone" => (decrypt_field(row.phone, key)?, "手机号"),
+        "id_number" => (decrypt_field(row.id_number, key)?, "身份证号"),
+        "address" => (decrypt_field(row.address, key)?, "地址"),
+        _ => return Err(AppError::BadRequest("不支持的敏感字段".to_string())),
+    };
+
+    // 细粒度审计：记录具体查看的字段与访问 IP。
+    append_log(
+        &state.config.log_file,
+        &format!(
+            "【敏感信息】用户 {} 查看了员工 {} (id={}) 的{}",
+            user_tag(&auth.name, &auth.username),
+            user_tag(&row.name, &row.username),
+            row.id,
+            label
+        ),
+        &ip,
+    );
+
+    Ok(Json(ApiResponse::ok(serde_json::json!({
+        "field": field,
+        "value": value
+    }))))
 }
 
 #[derive(sqlx::FromRow)]
@@ -142,10 +334,13 @@ struct EmployeeDetailRow {
 
 pub async fn create_employee(
     State(state): State<AppState>,
+    client_ip: ClientIp,
     auth: AuthUser,
     Json(body): Json<NewEmployee>,
 ) -> Result<Json<ApiResponse<serde_json::Value>>, AppError> {
     require_permission(&auth.permissions, "employee:create")?;
+
+    let ip = client_ip.0;
 
     let exists = sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(*) FROM employees WHERE username = ?",
@@ -163,6 +358,13 @@ pub async fn create_employee(
     let initial_password = crate::services::auth::generate_random_password();
     let default_password = hash_password(&initial_password, state.config.bcrypt_cost)?;
 
+    // 敏感字段静态加密后落库（AES-256-GCM，密钥 FIELD_ENC_KEY）。
+    let key = &state.config.field_enc_key;
+    let email = encrypt_field_opt(body.email, key)?;
+    let phone = encrypt_field_opt(body.phone, key)?;
+    let id_number = encrypt_field_opt(body.id_number, key)?;
+    let address = encrypt_field_opt(body.address, key)?;
+
     sqlx::query(
         "INSERT INTO employees (id, username, password, name, title, email, phone, \
          id_number, address, hire_date, must_change_password) \
@@ -173,10 +375,10 @@ pub async fn create_employee(
     .bind(&default_password)
     .bind(&body.name)
     .bind(&body.title)
-    .bind(&body.email)
-    .bind(&body.phone)
-    .bind(&body.id_number)
-    .bind(&body.address)
+    .bind(&email)
+    .bind(&phone)
+    .bind(&id_number)
+    .bind(&address)
     .bind(&body.hire_date)
     .execute(&state.pool)
     .await?;
@@ -200,7 +402,16 @@ pub async fn create_employee(
     .execute(&state.pool)
     .await?;
 
-    append_log(&state.config.log_file, &format!("用户 {} 创建员工 {} ({})", user_tag(&auth.name, &auth.username), body.name, body.username));
+    append_log(
+        &state.config.log_file,
+        &format!(
+            "用户 {} 创建员工 {} ({})",
+            user_tag(&auth.name, &auth.username),
+            body.name,
+            body.username
+        ),
+        &ip,
+    );
 
     Ok(Json(ApiResponse::created(serde_json::json!({
         "id": id,
@@ -242,17 +453,6 @@ pub async fn update_employee(
         return Err(AppError::NotFound);
     }
 
-    // F-24: 受保护账号（protect_block=1）禁止管理操作，防越权删除/禁用/改密/改权超管。
-    let protected: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM employees WHERE id = ? AND protect_block = 1",
-    )
-    .bind(&id)
-    .fetch_one(&state.pool)
-    .await?;
-    if protected > 0 {
-        return Err(AppError::BadRequest("该账号受保护，禁止该操作".to_string()));
-    }
-
     let mut qb: QueryBuilder<'_, sqlx::MySql> =
         QueryBuilder::new("UPDATE employees SET ");
 
@@ -274,42 +474,54 @@ pub async fn update_employee(
     }
 
     if let Some(email) = body.email {
+        let enc = encrypt_field_opt(email, &state.config.field_enc_key)?;
         if has_fields {
             qb.push(", ");
         }
         qb.push("email = ");
-        qb.push_bind(email);
+        qb.push_bind(enc);
         has_fields = true;
     }
 
     if let Some(phone) = body.phone {
+        let enc = encrypt_field_opt(phone, &state.config.field_enc_key)?;
         if has_fields {
             qb.push(", ");
         }
         qb.push("phone = ");
-        qb.push_bind(phone);
+        qb.push_bind(enc);
         has_fields = true;
     }
 
     if let Some(id_number) = body.id_number {
+        let enc = encrypt_field_opt(id_number, &state.config.field_enc_key)?;
         if has_fields {
             qb.push(", ");
         }
         qb.push("id_number = ");
-        qb.push_bind(id_number);
+        qb.push_bind(enc);
         has_fields = true;
     }
 
     if let Some(address) = body.address {
+        let enc = encrypt_field_opt(address, &state.config.field_enc_key)?;
         if has_fields {
             qb.push(", ");
         }
         qb.push("address = ");
-        qb.push_bind(address);
+        qb.push_bind(enc);
         has_fields = true;
     }
 
     if let Some(avatar) = body.avatar {
+        // F-6: 头像只接受本站上传图片（/uploads/<uuid>.<img-ext>），拒绝任意字符串。
+        if let Some(ref a) = avatar {
+            if !is_valid_avatar_url(a) {
+                return Err(AppError::BadRequest(
+                    "头像必须是本站上传的图片".to_string(),
+                ));
+            }
+        }
         if has_fields {
             qb.push(", ");
         }
@@ -350,24 +562,16 @@ pub async fn update_employee(
 
 pub async fn delete_employee(
     State(state): State<AppState>,
+    client_ip: ClientIp,
     auth: AuthUser,
     Path(id): Path<String>,
 ) -> Result<Json<ApiResponse<()>>, AppError> {
     require_permission(&auth.permissions, "employee:delete")?;
 
+    let ip = client_ip.0;
+
     if id == auth.id {
         return Err(AppError::BadRequest("不能删除自己".to_string()));
-    }
-
-    // F-24: 受保护账号（protect_block=1）禁止管理操作，防越权删除/禁用/改密/改权超管。
-    let protected: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM employees WHERE id = ? AND protect_block = 1",
-    )
-    .bind(&id)
-    .fetch_one(&state.pool)
-    .await?;
-    if protected > 0 {
-        return Err(AppError::BadRequest("该账号受保护，禁止该操作".to_string()));
     }
 
     let result = sqlx::query("DELETE FROM employees WHERE id = ?")
@@ -379,7 +583,15 @@ pub async fn delete_employee(
         return Err(AppError::NotFound);
     }
 
-    append_log(&state.config.log_file, &format!("用户 {} 删除了员工 {}", user_tag(&auth.name, &auth.username), id));
+    append_log(
+        &state.config.log_file,
+        &format!(
+            "用户 {} 删除了员工 {}",
+            user_tag(&auth.name, &auth.username),
+            id
+        ),
+        &ip,
+    );
     Ok(Json(ApiResponse::ok_msg("ok")))
 }
 
@@ -403,17 +615,7 @@ pub async fn reset_password(
         return Err(AppError::NotFound);
     }
 
-    // F-24: 受保护账号（protect_block=1）禁止管理操作，防越权删除/禁用/改密/改权超管。
-    let protected: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM employees WHERE id = ? AND protect_block = 1",
-    )
-    .bind(&id)
-    .fetch_one(&state.pool)
-    .await?;
-    if protected > 0 {
-        return Err(AppError::BadRequest("该账号受保护，禁止该操作".to_string()));
-    }
-
+    crate::services::auth::validate_password_strength(&body.new_password)?;
     let password = hash_password(&body.new_password, state.config.bcrypt_cost)?;
 
     // F-08: 重置密码后 pwd_version 递增，踢掉该员工所有已登录会话；F-02: 强制其下次登录修改密码。
@@ -448,20 +650,30 @@ pub async fn update_employee_permissions(
         return Err(AppError::NotFound);
     }
 
-    // F-24: 受保护账号（protect_block=1）禁止管理操作，防越权删除/禁用/改密/改权超管。
-    let protected: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM employees WHERE id = ? AND protect_block = 1",
+    // F-01: 操作者只能增删「自己拥有的权限」——目标现有但操作者没有的权限冻结保持：
+    //   - 新增（目标当前没有、新集合里有）→ 必须是操作者已有权限，否则 403（防提权）；
+    //   - 移除（目标当前有、新集合里没有）→ 必须是操作者已有权限，否则 403（防降权他人能力）。
+    //   两者都满足时，目标已有但操作者没有的权限被自动保留。
+    let current: Vec<String> = sqlx::query_scalar(
+        "SELECT p.code FROM employee_permissions ep JOIN permissions p ON p.id = ep.permission_id WHERE ep.employee_id = ?",
     )
     .bind(&id)
-    .fetch_one(&state.pool)
+    .fetch_all(&state.pool)
     .await?;
-    if protected > 0 {
-        return Err(AppError::BadRequest("该账号受保护，禁止该操作".to_string()));
-    }
 
-    // F-01: 新授权权限必须是操作者自身权限的子集，防止受限管理员授予自己没有的权限（如 system:config）。
-    for code in &body.permission_codes {
-        if !auth.permissions.iter().any(|p| p == code) {
+    let owned: std::collections::HashSet<&str> =
+        auth.permissions.iter().map(|s| s.as_str()).collect();
+    let new_set: std::collections::HashSet<&str> =
+        body.permission_codes.iter().map(|s| s.as_str()).collect();
+    let cur_set: std::collections::HashSet<&str> = current.iter().map(|s| s.as_str()).collect();
+
+    for code in &new_set {
+        if !cur_set.contains(code) && !owned.contains(code) {
+            return Err(AppError::Forbidden);
+        }
+    }
+    for code in &cur_set {
+        if !new_set.contains(code) && !owned.contains(code) {
             return Err(AppError::Forbidden);
         }
     }
@@ -485,6 +697,20 @@ pub async fn update_employee_permissions(
                 .await?;
         }
     }
+
+    // 防拉黑保护与权限联动：勾选 chat:protect_block 权限 ⇔ 该员工受保护（protect_block=1）。
+    // 该标记只影响聊天拉黑拦截（见 chat.rs block_user），不影响改密/删除/改权等管理操作。
+    let protect: i8 = if body.permission_codes.iter().any(|c| c == "chat:protect_block") {
+        1
+    } else {
+        0
+    };
+    sqlx::query("UPDATE employees SET protect_block = ? WHERE id = ?")
+        .bind(protect)
+        .bind(&id)
+        .execute(&mut *tx)
+        .await?;
+
     tx.commit().await?;
     Ok(Json(ApiResponse::ok_msg("权限已更新")))
 }

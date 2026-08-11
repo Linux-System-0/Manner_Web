@@ -27,6 +27,9 @@ pub struct Employee {
     #[allow(dead_code)]
     pub must_change_password: i8,
     pub preferences: Option<String>,
+    /// 当前有效会话 id（单设备登录：新登录会覆盖此值，旧会话令牌立即失效）。
+    #[allow(dead_code)]
+    pub active_session: Option<String>,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
 }
@@ -82,6 +85,8 @@ pub struct EmployeeListParams {
     pub page: Option<i64>,
     pub page_size: Option<i64>,
     pub keyword: Option<String>,
+    /// 按部门 id 过滤（部门成员筛选）。
+    pub department_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -107,6 +112,8 @@ pub struct EmployeeListRow {
     pub status: i8,
     pub protect_block: i8,
     pub created_at: NaiveDateTime,
+    /// 归属部门名称（逗号分隔，无部门为 NULL）。
+    pub departments: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -124,8 +131,22 @@ pub struct EmployeeDetail {
     pub status: i8,
     pub protect_block: i8,
     pub permissions: Vec<String>,
+    /// 归属部门 id 列表（多对多）。
+    pub department_ids: Vec<String>,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
+}
+
+/// 查看敏感信息解密结果（仅 employee:view_sensitive 权限可调用，且强制写日志）。
+#[derive(Debug, Serialize)]
+pub struct SensitiveEmployeeInfo {
+    pub id: String,
+    pub username: String,
+    pub name: String,
+    pub email: Option<String>,
+    pub phone: Option<String>,
+    pub id_number: Option<String>,
+    pub address: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

@@ -13,21 +13,29 @@ pub struct LoginLimits {
     pub lock_window_secs: u64,
 }
 
-/// 登录失败节流器：按「真实 IP」与「用户名」双维度计数。
+/// 登录失败节流器：按「(真实 IP, 用户名) 组合键」与「真实 IP 失败总数」双维度计数。
 ///
-/// - 键由调用方传入真实 TCP 对端地址（不信任 X-Forwarded-For 等可伪造头）。
-/// - 任一维度在时间窗口内失败次数达到阈值即锁定该维度，窗口过期后自动复位。
-/// - 无全局锁：攻击者无法用随机凭据锁死全站登录（避免全局锁定 DoS 放大）。
+/// - 键由调用方传入真实客户端地址（直连 = TCP 对端；经可信反代 = 解析后的 X-Real-IP）。
+/// - **组合键维度**（`{ip}|{username}`）：任一 (IP, 用户名) 对在窗口内失败达到阈值即锁定该组合。
+///   消除旧版「全局 IP 维度」与「全局用户名维度」锁定放大：攻击者无法用随机凭据
+///   锁死全站登录，也无法跨 IP 定向锁死单一账号（DoS 放大防护）。
+/// - **单 IP 总数维度**（`ip:{ip}`）：单 IP 累计失败达到阈值即锁定该 IP，
+///   防止单 IP 批量枚举不同用户名。
+/// - 无全局锁：不会出现「任何人刷 5 次就锁全站」的 DoS 放大。
 /// - 限流参数（max_failures / window）通过系统设置动态调整，`update_limits` 立即生效。
 pub struct LoginThrottle {
-    map: HashMap<String, Vec<Instant>>,
+    /// 组合键（IP|用户名）失败时间戳
+    pair_map: HashMap<String, Vec<Instant>>,
+    /// 单 IP 失败总数时间戳
+    ip_map: HashMap<String, Vec<Instant>>,
     limits: std::sync::RwLock<LoginLimits>,
 }
 
 impl LoginThrottle {
     pub fn new(max_failures: usize, window_secs: u64) -> Self {
         Self {
-            map: HashMap::new(),
+            pair_map: HashMap::new(),
+            ip_map: HashMap::new(),
             limits: std::sync::RwLock::new(LoginLimits {
                 max_failures,
                 lock_window_secs: window_secs,
@@ -49,22 +57,24 @@ impl LoginThrottle {
             l.max_failures = max_failures;
             l.lock_window_secs = window_secs;
         }
-        self.map.clear();
+        self.pair_map.clear();
+        self.ip_map.clear();
     }
 
     /// 清理窗口外的时间戳；空条目一并移除，防止 map 无限增长。
     fn prune(&mut self, now: Instant) {
         let window = Duration::from_secs(self.current_limits().lock_window_secs);
-        self.map.retain(|_, times| {
-            times.retain(|t| now.duration_since(*t) <= window);
-            !times.is_empty()
-        });
+        for map in [&mut self.pair_map, &mut self.ip_map] {
+            map.retain(|_, times| {
+                times.retain(|t| now.duration_since(*t) <= window);
+                !times.is_empty()
+            });
+        }
     }
 
-    fn locked_retry_after(&self, key: &str, now: Instant) -> Option<u64> {
+    fn locked_retry_after(&self, times: &[Instant], now: Instant) -> Option<u64> {
         let limits = self.current_limits();
         let window = Duration::from_secs(limits.lock_window_secs);
-        let times = self.map.get(key)?;
         let recent: Vec<&Instant> = times
             .iter()
             .filter(|t| now.duration_since(**t) <= window)
@@ -82,9 +92,13 @@ impl LoginThrottle {
     pub fn check(&mut self, ip: &str, username: &str) -> Result<(), AppError> {
         let now = Instant::now();
         self.prune(now);
+        let pair_key = format!("{ip}|{username}");
+        let ip_key = format!("ip:{ip}");
         if let Some(secs) = self
-            .locked_retry_after(&format!("ip:{ip}"), now)
-            .or_else(|| self.locked_retry_after(&format!("user:{username}"), now))
+            .locked_retry_after(self.pair_map.get(&pair_key).map(Vec::as_slice).unwrap_or(&[]), now)
+            .or_else(|| {
+                self.locked_retry_after(self.ip_map.get(&ip_key).map(Vec::as_slice).unwrap_or(&[]), now)
+            })
         {
             return Err(AppError::TooManyRequests {
                 retry_after_secs: secs,
@@ -93,19 +107,21 @@ impl LoginThrottle {
         Ok(())
     }
 
-    /// 记录一次登录失败（IP 与用户名双维度同时计数）。
+    /// 记录一次登录失败（组合键与单 IP 总数双维度同时计数）。
     pub fn record_failure(&mut self, ip: &str, username: &str) {
         let now = Instant::now();
         self.prune(now);
-        for key in [format!("ip:{ip}"), format!("user:{username}")] {
-            self.map.entry(key).or_default().push(now);
-        }
+        self.pair_map
+            .entry(format!("{ip}|{username}"))
+            .or_default()
+            .push(now);
+        self.ip_map.entry(format!("ip:{ip}")).or_default().push(now);
     }
 
-    /// 登录成功时清除该 IP 与该用户名的失败记录。
+    /// 登录成功时清除该 (IP, 用户名) 与该 IP 的失败记录。
     pub fn clear(&mut self, ip: &str, username: &str) {
-        self.map.remove(&format!("ip:{ip}"));
-        self.map.remove(&format!("user:{username}"));
+        self.pair_map.remove(&format!("{ip}|{username}"));
+        self.ip_map.remove(&format!("ip:{ip}"));
     }
 }
 
@@ -116,20 +132,41 @@ mod tests {
     use super::*;
 
     #[test]
-    fn locks_after_max_failures_on_either_dimension() {
+    fn locks_pair_after_max_failures_from_same_ip() {
         let mut t = LoginThrottle::new(3, 900);
-        // 仅用户名维度失败达到阈值 → 锁定(不依赖 IP)
         t.record_failure("10.0.0.1", "alice");
-        t.record_failure("10.0.0.2", "alice");
-        t.record_failure("10.0.0.3", "alice");
-        assert!(t.check("10.0.0.9", "alice").is_err(), "user 维度应锁定");
+        t.record_failure("10.0.0.1", "alice");
+        t.record_failure("10.0.0.1", "alice");
+        // 同一 (IP, 用户名) 达到阈值 → 锁定
+        assert!(t.check("10.0.0.1", "alice").is_err());
+        // 其他 IP 的同一用户名不受影响（消除跨 IP 定向锁死）
+        assert!(t.check("10.0.0.2", "alice").is_ok());
+    }
 
-        // 另一组:仅 IP 维度失败达到阈值 → 锁定
-        let mut t2 = LoginThrottle::new(3, 900);
-        t2.record_failure("10.0.0.1", "bob");
-        t2.record_failure("10.0.0.1", "carol");
-        t2.record_failure("10.0.0.1", "dave");
-        assert!(t2.check("10.0.0.1", "zzz_new_user").is_err(), "ip 维度应锁定");
+    #[test]
+    fn locks_ip_total_after_many_usernames() {
+        let mut t = LoginThrottle::new(3, 900);
+        t.record_failure("10.0.0.1", "a");
+        t.record_failure("10.0.0.1", "b");
+        t.record_failure("10.0.0.1", "c");
+        // 单 IP 总数达到阈值 → 该 IP 被锁（防批量枚举）
+        assert!(t.check("10.0.0.1", "zzz_new").is_err());
+        // 其他 IP 完全不受影响（无全局锁）
+        assert!(t.check("10.0.0.9", "zzz_new").is_ok());
+    }
+
+    #[test]
+    fn cross_ip_attacker_cannot_lock_victim_account() {
+        let mut t = LoginThrottle::new(3, 900);
+        // 攻击者从 3 个不同 IP 各失败 2 次
+        t.record_failure("1.1.1.1", "victim");
+        t.record_failure("1.1.1.1", "victim");
+        t.record_failure("2.2.2.2", "victim");
+        t.record_failure("2.2.2.2", "victim");
+        t.record_failure("3.3.3.3", "victim");
+        t.record_failure("3.3.3.3", "victim");
+        // 任意 IP 均未达到阈值 → 受害者仍可正常登录
+        assert!(t.check("5.5.5.5", "victim").is_ok());
     }
 
     #[test]
