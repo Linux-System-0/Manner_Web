@@ -169,12 +169,11 @@ async fn migrate_direct_permissions(pool: &sqlx::MySqlPool) -> Result<(), anyhow
 
         for (emp_id, username) in rows {
             sqlx::query(
-                "INSERT IGNORE INTO roles (id, name, code, is_system, scope_type, description) \
-                 VALUES (?, ?, ?, 0, 'all', '存量直接授权迁移生成的私有角色')",
+                "INSERT IGNORE INTO roles (id, name, is_system, scope_type, description) \
+                 VALUES (?, ?, 0, 'all', '存量直接授权迁移生成的私有角色')",
             )
             .bind(&emp_id)
             .bind(format!("直接授权-{}", username))
-            .bind(format!("priv_{}", emp_id))
             .execute(pool)
             .await?;
 

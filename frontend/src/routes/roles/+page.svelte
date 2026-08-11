@@ -49,7 +49,6 @@
     mode: 'create' as 'create' | 'edit',
     id: '',
     name: '',
-    code: '',
     parent_id: '',
     scope_type: 'self' as ScopeType,
     description: '',
@@ -117,7 +116,6 @@
       mode: 'create',
       id: '',
       name: '',
-      code: '',
       parent_id: '',
       scope_type: 'self',
       description: '',
@@ -133,7 +131,6 @@
       mode: 'edit',
       id: r.id,
       name: r.name,
-      code: r.code,
       parent_id: r.parent_id || '',
       scope_type: r.scope_type,
       description: r.description || '',
@@ -171,13 +168,8 @@
 
   async function handleSave() {
     const name = modal.name.trim()
-    const code = modal.code.trim()
     if (!name) {
       message.error('请输入角色名称')
-      return
-    }
-    if (modal.mode === 'create' && (!code || !/^[A-Za-z0-9_:]+$/.test(code))) {
-      message.error('请输入合法角色编码（字母数字与 _ :）')
       return
     }
     if (modal.scope_type === 'custom' && modal.scope_department_ids.length === 0) {
@@ -189,7 +181,6 @@
       if (modal.mode === 'create') {
         const res = await createRole({
           name,
-          code,
           parent_id: modal.parent_id || undefined,
           scope_type: modal.scope_type,
           description: modal.description.trim() || undefined,
@@ -249,7 +240,6 @@
 
   const columns: TableColumn<Role>[] = [
     { title: '角色名称', dataIndex: 'name', key: 'name', width: 150 },
-    { title: '编码', dataIndex: 'code', key: 'code', width: 160 },
     { title: '父角色', key: 'parent', width: 120, render: (r) => r.parent_name || '-' },
     {
       title: '数据范围',
@@ -339,19 +329,9 @@
     bodyStyle="padding:16px 24px"
   >
     <Form class="ant-form-vertical">
-      <div style="display:grid;grid-template-columns:1fr 1fr;column-gap:16px">
-        <FormItem label="角色名称" required={true}>
-          <Input value={modal.name} disabled={modal.is_system === 1} onInput={(v) => (modal = { ...modal, name: v })} placeholder="如：部门主管" />
-        </FormItem>
-        <FormItem label="角色编码" required={modal.mode === 'create'} extra={modal.mode === 'create' ? '创建后不可修改' : ''}>
-          <Input
-            value={modal.code}
-            disabled={modal.mode === 'edit' || modal.is_system === 1}
-            onInput={(v) => (modal = { ...modal, code: v })}
-            placeholder="如：dept_manager"
-          />
-        </FormItem>
-      </div>
+      <FormItem label="角色名称" required={true}>
+        <Input value={modal.name} disabled={modal.is_system === 1} onInput={(v) => (modal = { ...modal, name: v })} placeholder="如：部门主管" />
+      </FormItem>
       <div style="display:grid;grid-template-columns:1fr 1fr;column-gap:16px">
         <FormItem label="父角色（继承权限）">
           <Select

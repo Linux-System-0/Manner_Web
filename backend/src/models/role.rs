@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 pub struct Role {
     pub id: String,
     pub name: String,
-    pub code: String,
     pub parent_id: Option<String>,
     pub is_system: i8,
     pub scope_type: String,
@@ -19,7 +18,6 @@ pub struct Role {
 pub struct RoleListItem {
     pub id: String,
     pub name: String,
-    pub code: String,
     pub parent_id: Option<String>,
     pub parent_name: Option<String>,
     pub is_system: i8,
@@ -34,7 +32,6 @@ pub struct RoleListItem {
 #[derive(Debug, Deserialize)]
 pub struct CreateRoleRequest {
     pub name: String,
-    pub code: String,
     pub parent_id: Option<String>,
     pub scope_type: String,
     pub description: Option<String>,

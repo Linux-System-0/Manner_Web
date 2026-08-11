@@ -470,7 +470,6 @@ pub async fn list_roles(
                 member_count: count_map.get(&r.id).copied().unwrap_or(0),
                 id: r.id,
                 name: r.name,
-                code: r.code,
                 parent_id: r.parent_id,
                 is_system: r.is_system,
                 scope_type: r.scope_type,
@@ -497,20 +496,9 @@ pub async fn create_role(
     let ip = client_ip.0;
 
     let name = body.name.trim().to_string();
-    let code = body.code.trim().to_string();
     if name.is_empty() || name.chars().count() > 64 {
         return Err(AppError::ValidationError(
             "角色名称不能为空且不超过 64 个字符".to_string(),
-        ));
-    }
-    if code.is_empty()
-        || code.chars().count() > 64
-        || !code
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == ':')
-    {
-        return Err(AppError::ValidationError(
-            "角色编码只能包含字母数字与 _ :".to_string(),
         ));
     }
     if !valid_scope_type(&body.scope_type) {
@@ -527,13 +515,6 @@ pub async fn create_role(
         .fetch_one(&state.pool)
         .await?;
     if name_exist > 0 {
-        return Err(AppError::Conflict);
-    }
-    let code_exist: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM roles WHERE code = ?")
-        .bind(&code)
-        .fetch_one(&state.pool)
-        .await?;
-    if code_exist > 0 {
         return Err(AppError::Conflict);
     }
 
@@ -588,12 +569,11 @@ pub async fn create_role(
     let id = Uuid::new_v4().to_string();
     let mut tx = state.pool.begin().await?;
     sqlx::query(
-        "INSERT INTO roles (id, name, code, parent_id, is_system, scope_type, description) \
-         VALUES (?, ?, ?, ?, 0, ?, ?)",
+        "INSERT INTO roles (id, name, parent_id, is_system, scope_type, description) \
+         VALUES (?, ?, ?, 0, ?, ?)",
     )
     .bind(&id)
     .bind(&name)
-    .bind(&code)
     .bind(&parent_id)
     .bind(&body.scope_type)
     .bind(body.description.as_deref())
@@ -609,10 +589,9 @@ pub async fn create_role(
     append_log(
         &state.config.log_file,
         &format!(
-            "用户 {} 创建了角色 {} ({})",
+            "用户 {} 创建了角色 {}",
             user_tag(&auth.name, &auth.username),
-            name,
-            code
+            name
         ),
         &ip,
     );

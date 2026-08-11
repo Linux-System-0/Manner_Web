@@ -157,10 +157,9 @@ pub async fn register(
     .execute(&mut *tx)
     .await?;
 
-    // 首个管理员绑定 super_admin 内置角色（拥有全部权限）。
+    // 首个管理员绑定 super_admin 内置角色（固定 id，拥有全部权限）。
     sqlx::query(
-        "INSERT INTO employee_roles (employee_id, role_id) \
-         SELECT ?, id FROM roles WHERE code = 'super_admin'",
+        "INSERT IGNORE INTO employee_roles (employee_id, role_id) VALUES (?, '00000000-0000-0000-0000-000000000001')",
     )
     .bind(&id)
     .execute(&mut *tx)

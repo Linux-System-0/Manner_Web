@@ -186,7 +186,6 @@ INSERT IGNORE INTO permissions (code, name, module) VALUES ('role:manage', '角�
 CREATE TABLE IF NOT EXISTS roles (
     id CHAR(36) NOT NULL PRIMARY KEY,
     name VARCHAR(64) NOT NULL UNIQUE,
-    code VARCHAR(64) NOT NULL UNIQUE,
     parent_id CHAR(36) DEFAULT NULL,
     is_system TINYINT NOT NULL DEFAULT 0,
     scope_type VARCHAR(16) NOT NULL DEFAULT 'self' COMMENT 'all|subtree|department|self|custom',
@@ -195,6 +194,10 @@ CREATE TABLE IF NOT EXISTS roles (
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_parent (parent_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 角色编码（code）已移除：角色以唯一名称 + id 标识（super_admin 用固定 id 特判）。
+-- 存量库若仍存在 code 列则删除（新建库无此列，本句失败仅告警，属预期）。
+ALTER TABLE roles DROP COLUMN code;
 
 -- 角色-权限 多对多。
 CREATE TABLE IF NOT EXISTS role_permissions (
@@ -237,8 +240,8 @@ CREATE TABLE IF NOT EXISTS role_department_scopes (
 
 -- 种子：super_admin 内置角色（全权限、all 数据范围，固定 id），首个管理员注册时绑定。
 -- is_system=1：不可删除/改名/改权限/改范围；员工角色分配中不允许通过部门角色绑定。
-INSERT IGNORE INTO roles (id, name, code, is_system, scope_type, description)
-VALUES ('00000000-0000-0000-0000-000000000001', '超级管理员', 'super_admin', 1, 'all', '系统内置超级管理员角色，拥有全部权限，不可删除');
+INSERT IGNORE INTO roles (id, name, is_system, scope_type, description)
+VALUES ('00000000-0000-0000-0000-000000000001', '超级管理员', 1, 'all', '系统内置超级管理员角色，拥有全部权限，不可删除');
 
 -- super_admin 授予全部权限（幂等，新权限码追加后自动补齐）。
 INSERT IGNORE INTO role_permissions (role_id, permission_id)

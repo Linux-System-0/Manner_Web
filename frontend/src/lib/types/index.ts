@@ -76,7 +76,6 @@ export type ScopeType = Grant['scope_type']
 export interface Role {
   id: string
   name: string
-  code: string
   parent_id: string | null
   parent_name?: string | null
   /** 1 = 系统内置（super_admin），不可删除/改权限/改范围 */

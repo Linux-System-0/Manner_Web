@@ -14,7 +14,6 @@ export async function getRoles(): Promise<ApiResponse<RoleListData>> {
 
 export interface CreateRoleRequest {
   name: string
-  code: string
   parent_id?: string
   scope_type: string
   description?: string
