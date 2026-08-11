@@ -27,10 +27,13 @@ export interface Employee {
   avatar: string | null
   hire_date: string
   status: number
-  protect_block: number
   permissions?: string[]
+  /** 有效授权（码 + 数据范围），由角色授权派生 */
+  grants?: Grant[]
   /** 归属部门 id 列表（多对多） */
   department_ids?: string[]
+  /** 分配的角色 id 列表 */
+  role_ids?: string[]
   /** 归属部门名称（逗号/顿号分隔，列表接口返回） */
   departments?: string | null
   created_at: string
@@ -56,6 +59,34 @@ export interface PermissionModule {
   module: string
   module_name: string
   permissions: Permission[]
+}
+
+/** 单一授权粒度：权限码 + 数据范围（由角色授权派生） */
+export interface Grant {
+  code: string
+  /** all | subtree | department | self | custom */
+  scope_type: 'all' | 'subtree' | 'department' | 'self' | 'custom'
+  /** scope_type=custom 时指定的部门集合 */
+  scope_department_ids?: string[]
+}
+
+export type ScopeType = Grant['scope_type']
+
+/** 角色（RBAC + 数据范围 + 部门角色继承） */
+export interface Role {
+  id: string
+  name: string
+  code: string
+  parent_id: string | null
+  parent_name?: string | null
+  /** 1 = 系统内置（super_admin），不可删除/改权限/改范围 */
+  is_system: number
+  scope_type: ScopeType
+  description?: string | null
+  permission_codes: string[]
+  scope_department_ids: string[]
+  member_count: number
+  created_at: string
 }
 
 export interface ApiResponse<T = unknown> {
@@ -184,6 +215,8 @@ export interface Department {
   leader_names: string | null
   /** 负责人 id 列表 */
   leader_ids?: string[]
+  /** 绑定角色名称（顿号分隔） */
+  role_names?: string | null
   member_count: number
   sort_order: number
 }

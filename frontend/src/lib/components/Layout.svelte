@@ -97,6 +97,9 @@
     ...(authStore.hasPermission('department:list')
       ? [{ key: '/departments', label: '部门管理', icon: 'idcard' }]
       : []),
+    ...(authStore.hasPermission('role:manage')
+      ? [{ key: '/roles', label: '角色管理', icon: 'lock' }]
+      : []),
     { key: '/chat', label: '聊天', icon: 'message' },
     ...(authStore.hasPermission('system:settings')
       ? [{ key: '/logs', label: '应用日志', icon: 'file-text' }]

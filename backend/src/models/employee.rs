@@ -19,7 +19,6 @@ pub struct Employee {
     pub hire_date: Option<NaiveDate>,
     #[allow(dead_code)]
     pub status: i8,
-    pub protect_block: i8,
     /// F-08: 密码版本号（改密时递增，旧 token 失效）。
     #[allow(dead_code)]
     pub pwd_version: i64,
@@ -110,7 +109,6 @@ pub struct EmployeeListRow {
     pub avatar: Option<String>,
     pub hire_date: Option<NaiveDate>,
     pub status: i8,
-    pub protect_block: i8,
     pub created_at: NaiveDateTime,
     /// 归属部门名称（逗号分隔，无部门为 NULL）。
     pub departments: Option<String>,
@@ -129,10 +127,14 @@ pub struct EmployeeDetail {
     pub avatar: Option<String>,
     pub hire_date: Option<NaiveDate>,
     pub status: i8,
-    pub protect_block: i8,
+    /// 有效权限码集合（由角色授权派生）。
     pub permissions: Vec<String>,
+    /// 有效授权（码 + 数据范围），供前端范围感知展示。
+    pub grants: Vec<crate::services::permission::Grant>,
     /// 归属部门 id 列表（多对多）。
     pub department_ids: Vec<String>,
+    /// 分配的角色 id 列表。
+    pub role_ids: Vec<String>,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
 }
@@ -173,11 +175,6 @@ pub struct ResetPasswordRequest {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct UpdateEmployeePermissionsRequest {
-    pub permission_codes: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
 pub struct PrecheckRequest {
     pub username: String,
 }
@@ -199,7 +196,7 @@ pub struct FirstLoginRequest {
     pub new_password: String,
 }
 
-// ---- 权限字典（员工直接授权用，原角色模块迁移至此）----
+// ---- 权限字典（角色授权用）----
 
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Permission {

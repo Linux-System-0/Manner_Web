@@ -11,7 +11,14 @@ pub struct Claims {
     pub username: String,
     #[serde(default)]
     pub name: String,
+    /// 有效权限码快照（access 令牌签发时解析；refresh 令牌为空）。
     pub permissions: Vec<String>,
+    /// 有效授权快照（码 + 数据范围）。权限变更（perm_version 不一致）时由中间件重算。
+    #[serde(default)]
+    pub grants: Vec<crate::services::permission::Grant>,
+    /// 权限版本号：权限/角色/部门归属等变更时递增，中间件比对不一致即重算有效授权。
+    #[serde(default)]
+    pub perm_version: i64,
     pub exp: usize,
     pub jti: String,
     /// 会话 id（单设备登录）：同一账号在别处登录会更新 employees.active_session，
@@ -34,6 +41,8 @@ pub fn create_token(
     username: &str,
     name: &str,
     permissions: &[String],
+    grants: &[crate::services::permission::Grant],
+    perm_version: i64,
     pwd_version: i64,
     session_id: &str,
     secret: &str,
@@ -48,6 +57,8 @@ pub fn create_token(
         username: username.to_string(),
         name: name.to_string(),
         permissions: permissions.to_vec(),
+        grants: grants.to_vec(),
+        perm_version,
         exp,
         jti,
         sid: session_id.to_string(),
@@ -74,6 +85,7 @@ pub fn create_refresh_token(
     employee_id: &str,
     username: &str,
     name: &str,
+    perm_version: i64,
     pwd_version: i64,
     session_id: &str,
     secret: &str,
@@ -88,6 +100,8 @@ pub fn create_refresh_token(
         username: username.to_string(),
         name: name.to_string(),
         permissions: Vec::new(),
+        grants: Vec::new(),
+        perm_version,
         exp,
         jti,
         sid: session_id.to_string(),

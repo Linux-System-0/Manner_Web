@@ -12,12 +12,11 @@
     getEmployee,
     deleteEmployee,
     resetPassword,
-    updateEmployeePermissions,
   } from '$lib/api/employees'
-  import { getPermissions } from '$lib/api/system'
+  import { getRoles, updateEmployeeRoles } from '$lib/api/roles'
   import { getDepartments } from '$lib/api/departments'
   import { getOrCreateDirectConversation } from '$lib/api/chat'
-  import type { Employee, PermissionModule } from '$lib/types'
+  import type { Employee, Role } from '$lib/types'
   import Table from '$lib/components/Table.svelte'
   import type { TableColumn } from '$lib/components/Table.svelte'
   import Button from '$lib/components/Button.svelte'
@@ -26,7 +25,6 @@
   import Space from '$lib/components/Space.svelte'
   import Popconfirm from '$lib/components/Popconfirm.svelte'
   import Modal from '$lib/components/Modal.svelte'
-  import Checkbox from '$lib/components/Checkbox.svelte'
   import Tag from '$lib/components/Tag.svelte'
   import Card from '$lib/components/Card.svelte'
   import Result from '$lib/components/Result.svelte'
@@ -53,16 +51,16 @@
   // F-08: 重置密码成功后的初始密码展示弹窗（页面内弹窗展示，不用 toast 提示显示密码）
   let pwdResult = $state({ open: false, password: '', name: '' })
 
-  // 权限设置弹窗
-  let permModal = $state({ open: false, employee: null as Employee | null })
-  let permModules = $state<PermissionModule[]>([])
-  let selectedPerms = $state<string[]>([])
-  let savingPerms = $state(false)
+  // 角色设置弹窗
+  let roleModal = $state({ open: false, employee: null as Employee | null })
+  let roleList = $state<Role[]>([])
+  let selectedRoleIds = $state<string[]>([])
+  let savingRoles = $state(false)
 
   let canCreate = $derived($authStore.permissions.includes('employee:create'))
   let canEdit = $derived($authStore.permissions.includes('employee:edit'))
   let canPassword = $derived($authStore.permissions.includes('employee:password'))
-  let canPermEdit = $derived($authStore.permissions.includes('employee:edit'))
+  let canRoleEdit = $derived($authStore.permissions.includes('role:manage'))
   let canDelete = $derived($authStore.permissions.includes('employee:delete'))
   let canViewSensitive = $derived($authStore.permissions.includes('employee:view_sensitive'))
 
@@ -197,129 +195,39 @@
     }
   }
 
-  // ---- 权限矩阵 ----
-  async function openPermModal(emp: Employee) {
+  // ---- 角色分配 ----
+  async function openRoleModal(emp: Employee) {
     try {
-      const [permRes, empRes] = await Promise.all([getPermissions(), getEmployee(emp.id)])
-      if (permRes.code !== 0 || empRes.code !== 0) {
-        message.error(permRes.message || empRes.message || '获取权限数据失败')
+      const [roleRes, empRes] = await Promise.all([getRoles(), getEmployee(emp.id)])
+      if (roleRes.code !== 0 || empRes.code !== 0) {
+        message.error(roleRes.message || empRes.message || '获取角色数据失败')
         return
       }
-      permModules = permRes.data.modules
-      selectedPerms = ((empRes.data as Employee & { permissions?: string[] }).permissions) || []
-      permModal = { open: true, employee: emp }
+      roleList = roleRes.data.items
+      selectedRoleIds = ((empRes.data as Employee & { role_ids?: string[] }).role_ids) || []
+      roleModal = { open: true, employee: emp }
     } catch (err: unknown) {
-      message.error(getApiError(err, '获取权限数据失败'))
+      message.error(getApiError(err, '获取角色数据失败'))
     }
   }
 
-  function togglePerm(code: string) {
-    if (!canManagePerm(code)) return
-    selectedPerms = selectedPerms.includes(code)
-      ? selectedPerms.filter((c) => c !== code)
-      : [...selectedPerms, code]
-  }
-
-  async function handleSavePerms() {
-    const emp = permModal.employee
+  async function handleSaveRoles() {
+    const emp = roleModal.employee
     if (!emp) return
-    savingPerms = true
+    savingRoles = true
     try {
-      const res = await updateEmployeePermissions(emp.id, selectedPerms)
+      const res = await updateEmployeeRoles(emp.id, selectedRoleIds)
       if (res.code !== 0) {
-        message.error(res.message || '保存权限失败')
+        message.error(res.message || '保存角色失败')
         return
       }
-      message.success('权限已更新')
-      permModal = { open: false, employee: null }
+      message.success('角色已更新')
+      roleModal = { open: false, employee: null }
     } catch (err: unknown) {
-      message.error(getApiError(err, '保存权限失败'))
+      message.error(getApiError(err, '保存角色失败'))
     } finally {
-      savingPerms = false
+      savingRoles = false
     }
-  }
-
-  // ---- 权限矩阵辅助逻辑 ----
-  const actionLabels: Record<string, string> = {
-    list: '查看列表',
-    view: '查看详情',
-    create: '新增',
-    edit: '编辑',
-    delete: '删除',
-    view_sensitive: '查看敏感信息',
-    password: '重置密码',
-    protect_block: '防拉黑保护',
-    group_create: '群聊创建',
-    upload: '上传文件',
-    config: '系统配置',
-    settings: '设置',
-  }
-  const moduleOrder: Record<string, number> = { employee: 0, department: 1, chat: 3, system: 4 }
-  const chatKeepActions = new Set(['protect_block', 'group_create', 'upload'])
-  const hideActions = new Set(['config'])
-
-  /** 操作者能否管理该权限码（增删）：只能操作自己拥有的权限 */
-  const canManagePerm = (code: string) => $authStore.permissions.includes(code)
-
-  function sortedModules(mods: PermissionModule[]): PermissionModule[] {
-    return [...mods]
-      .sort((a, b) => (moduleOrder[a.module] ?? 99) - (moduleOrder[b.module] ?? 99))
-  }
-
-  function matrixActions(mods: PermissionModule[]): string[] {
-    const set = new Set<string>()
-    for (const m of mods) {
-      for (const p of m.permissions) {
-        const a = p.code.split(':')[1]
-        if (a) set.add(a)
-      }
-    }
-    return [...set].filter((a) => !hideActions.has(a))
-  }
-
-  function isAnyOtherChecked(mod: PermissionModule): boolean {
-    return mod.permissions.some((p) => {
-      const action = p.code.split(':')[1]
-      return action !== 'list' && selectedPerms.includes(p.code)
-    })
-  }
-
-  function isChatStruck(mod: PermissionModule, permExists: boolean, action: string): boolean {
-    return mod.module === 'chat' && permExists && !chatKeepActions.has(action)
-  }
-
-  /** 模块内当前可勾选的权限码（排除聊天划线项、list 锁定项与操作者无权增删的锁定项） */
-  function checkableCodes(mod: PermissionModule): string[] {
-    const out: string[] = []
-    for (const p of mod.permissions) {
-      const action = p.code.split(':')[1]
-      if (!action) continue
-      if (isChatStruck(mod, true, action)) continue
-      if (action === 'list' && isAnyOtherChecked(mod)) continue
-      if (!canManagePerm(p.code)) continue
-      out.push(p.code)
-    }
-    return out
-  }
-
-  /** 模块级全选/半选状态 */
-  function moduleCheckState(mod: PermissionModule): { all: boolean; partial: boolean } {
-    const codes = checkableCodes(mod)
-    if (codes.length === 0) return { all: false, partial: false }
-    const checked = codes.filter((c) => selectedPerms.includes(c)).length
-    return { all: checked === codes.length, partial: checked > 0 && checked < codes.length }
-  }
-
-  function toggleModuleAll(mod: PermissionModule) {
-    const codes = checkableCodes(mod)
-    const { all } = moduleCheckState(mod)
-    const next = new Set(selectedPerms)
-    if (all) {
-      codes.forEach((c) => next.delete(c))
-    } else {
-      codes.forEach((c) => next.add(c))
-    }
-    selectedPerms = [...next]
   }
 
   // ---- 表格列 ----
@@ -364,11 +272,6 @@
         }
       })
       .catch(() => {})
-    getPermissions()
-      .then((res) => {
-        if (res.code === 0) permModules = res.data.modules
-      })
-      .catch(() => {})
   })
 </script>
 
@@ -400,9 +303,9 @@
           <Icon name="edit" style="font-size:14px" />编辑
         </Button>
       {/if}
-      {#if !(row.id === $authStore.user?.id) && canPermEdit}
-        <Button type="link" size="small" tooltip="设置该员工的权限" onClick={() => openPermModal(row)}>
-          <Icon name="setting" style="font-size:14px" />权限
+      {#if !(row.id === $authStore.user?.id) && canRoleEdit}
+        <Button type="link" size="small" tooltip="分配该员工的角色（权限随角色派生）" onClick={() => openRoleModal(row)}>
+          <Icon name="setting" style="font-size:14px" />角色
         </Button>
       {/if}
       {#if !(row.id === $authStore.user?.id) && canPassword}
@@ -524,94 +427,56 @@
     </div>
   </Modal>
 
-  <!-- 权限设置弹窗 -->
-  {#snippet permFooter()}
-    <Button tooltip="关闭弹窗，不保存修改" onClick={() => (permModal = { open: false, employee: null })}>取消</Button>
-    <Button type="primary" tooltip="保存权限设置" loading={savingPerms} onClick={handleSavePerms}>保存权限</Button>
+  <!-- 角色分配弹窗 -->
+  {#snippet roleFooter()}
+    <Button tooltip="关闭弹窗，不保存修改" onClick={() => (roleModal = { open: false, employee: null })}>取消</Button>
+    <Button type="primary" tooltip="保存角色分配" loading={savingRoles} onClick={handleSaveRoles}>保存角色</Button>
   {/snippet}
 
-  {#snippet permMatrix()}
+  {#snippet roleBody()}
     <div style="min-width:0">
-      <span style="color:var(--ant-color-text-secondary);display:block;margin-bottom:16px">
-        勾选需要分配给该用户的权限
+      <span style="color:var(--ant-color-text-secondary);display:block;margin-bottom:12px">
+        选择分配给该员工的角色（支持多选；最终权限 = 员工角色 + 部门角色的并集，含父子角色继承）。
       </span>
-      {#if permModules.length === 0}
-        <span style="color:var(--ant-color-warning)">暂无权限数据</span>
+      {#if roleList.length === 0}
+        <span style="color:var(--ant-color-warning)">暂无可分配的角色，请先在「角色管理」中创建</span>
       {:else}
-        <table style="border-collapse:collapse;width:100%">
-          <thead>
-            <tr>
-              <th
-                style="padding:6px 8px;border:1px solid var(--ant-color-border-secondary);background:var(--ant-color-fill-quaternary);text-align:center;white-space:nowrap;font-size:13px"
-              >
-                资源模块
-              </th>
-              {#each matrixActions(permModules) as action}
-                <th
-                  style="padding:6px 8px;border:1px solid var(--ant-color-border-secondary);background:var(--ant-color-fill-quaternary);text-align:center;white-space:nowrap;font-size:13px"
-                >
-                  {actionLabels[action] || action}
-                </th>
-              {/each}
-            </tr>
-          </thead>
-          <tbody>
-            {#each sortedModules(permModules) as mod (mod.module)}
-              {@const state = moduleCheckState(mod)}
-              <tr>
-                <td
-                  style="padding:6px 8px;border:1px solid var(--ant-color-border-secondary);font-weight:500;white-space:nowrap"
-                >
-                  <Checkbox
-                    checked={state.all}
-                    indeterminate={state.partial}
-                    disabled={checkableCodes(mod).length === 0}
-                    onChange={() => toggleModuleAll(mod)}
-                  />
-                  <span style="margin-left:6px">{mod.module_name}</span>
-                </td>
-                {#each matrixActions(permModules) as action}
-                  {@const permCode = `${mod.module}:${action}`}
-                  {@const permExists = mod.permissions.some((p) => p.code === permCode)}
-                  {@const isChatOther = isChatStruck(mod, permExists, action)}
-                  {@const isListDisabled = action === 'list' && isAnyOtherChecked(mod)}
-                  <td style="padding:6px 8px;border:1px solid var(--ant-color-border-secondary);text-align:center">
-                    {#if permExists && !isChatOther}
-                      {@const locked = !canManagePerm(permCode)}
-                      <Checkbox
-                        checked={isListDisabled || selectedPerms.includes(permCode)}
-                        disabled={isListDisabled || locked}
-                        style={isListDisabled || locked ? 'cursor:not-allowed' : ''}
-                        onChange={() => {
-                          if (isListDisabled || locked) return
-                          togglePerm(permCode)
-                        }}
-                      />
-                    {:else if permExists && isChatOther}
-                      <span style="color:var(--ant-color-text-quaternary);text-decoration:line-through">
-                        {actionLabels[action] || action}
-                      </span>
-                    {:else}
-                      <span style="color:var(--ant-color-text-quaternary)">—</span>
-                    {/if}
-                  </td>
-                {/each}
-              </tr>
-            {/each}
-          </tbody>
-        </table>
+        <div style="display:flex;flex-direction:column;gap:8px;max-height:360px;overflow-y:auto">
+          {#each roleList as role}
+            <label
+              style="display:flex;align-items:center;gap:8px;padding:10px 12px;border:1px solid var(--ant-color-border-secondary);border-radius:6px;cursor:pointer"
+            >
+              <input
+                type="checkbox"
+                style="accent-color:var(--ant-color-primary)"
+                checked={selectedRoleIds.includes(role.id)}
+                onchange={() => {
+                  selectedRoleIds = selectedRoleIds.includes(role.id)
+                    ? selectedRoleIds.filter((id) => id !== role.id)
+                    : [...selectedRoleIds, role.id]
+                }}
+              />
+              <span style="flex:1;font-weight:500">
+                {role.name}
+                {#if role.is_system === 1}<span style="color:var(--ant-color-error);font-size:12px">内置</span>{/if}
+                {#if role.parent_name}<span style="color:var(--ant-color-text-secondary);font-size:12px">继承自 {role.parent_name}</span>{/if}
+              </span>
+              <span style="color:var(--ant-color-text-secondary);font-size:12px">{role.permission_codes.length} 项权限</span>
+            </label>
+          {/each}
+        </div>
       {/if}
     </div>
   {/snippet}
 
   <Modal
-    open={permModal.open}
-    title={`权限设置 - ${permModal.employee?.name || ''}`}
-    onclose={() => (permModal = { open: false, employee: null })}
-    footer={permFooter}
-    width={1000}
-    bodyStyle="padding:16px 24px;overflow-x:auto"
+    open={roleModal.open}
+    title={`角色分配 - ${roleModal.employee?.name || ''}`}
+    onclose={() => (roleModal = { open: false, employee: null })}
+    footer={roleFooter}
+    width={620}
+    bodyStyle="padding:16px 24px"
   >
-    {@render permMatrix()}
+    {@render roleBody()}
   </Modal>
 {/if}

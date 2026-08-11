@@ -110,15 +110,15 @@ pub async fn auth_middleware(
     // F-13: 同时校验账号状态。status=0（禁用/离职）后，其所有已签发 token 立即失效。
     // 单设备登录：同一账号在别处重新登录会覆盖 employees.active_session，
     // 本会话 sid 与之一致才放行，否则视为「已在其他设备登录」被踢下线。
-    let account: Option<(i64, i8, Option<String>)> = sqlx::query_as(
-        "SELECT pwd_version, status, active_session FROM employees WHERE id = ?",
+    let account: Option<(i64, i8, Option<String>, i64)> = sqlx::query_as(
+        "SELECT pwd_version, status, active_session, perm_version FROM employees WHERE id = ?",
     )
     .bind(&claims.sub)
     .fetch_optional(&state.pool)
     .await
     .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
 
-    let Some((stored_pwd_version, stored_status, active_session)) = account else {
+    let Some((stored_pwd_version, stored_status, active_session, stored_perm_version)) = account else {
         return Err(AppError::Unauthorized);
     };
 
@@ -132,7 +132,30 @@ pub async fn auth_middleware(
         }
     }
 
+    // 权限即时生效：令牌内 perm_version 与库不一致（角色/权限/部门归属等变更后递增），
+    // 或令牌内无授权快照（旧格式/无权限）时，从库重算有效授权并替换注入。
+    let (permissions, grants) =
+        if claims.perm_version == stored_perm_version && !claims.grants.is_empty() {
+            (claims.permissions.clone(), claims.grants.clone())
+        } else {
+            let fresh = crate::services::permission::resolve_effective_grants(&state.pool, &claims.sub)
+                .await
+                .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
+            let codes = crate::services::permission::permission_codes(&fresh);
+            (codes, fresh)
+        };
+
+    let auth_user = AuthUser {
+        id: claims.sub.clone(),
+        username: claims.username.clone(),
+        name: claims.name.clone(),
+        permissions,
+        grants,
+        jti: claims.jti.clone(),
+    };
+
     req.extensions_mut().insert(claims);
+    req.extensions_mut().insert(auth_user);
     Ok(next.run(req).await)
 }
 
@@ -142,6 +165,7 @@ pub struct AuthUser {
     pub username: String,
     pub name: String,
     pub permissions: Vec<String>,
+    pub grants: Vec<crate::services::permission::Grant>,
     #[allow(dead_code)]
     pub jti: String,
 }
@@ -151,17 +175,11 @@ impl<S> FromRequestParts<S> for AuthUser {
     type Rejection = AppError;
 
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        let claims = parts
+        parts
             .extensions
-            .get::<Claims>()
-            .ok_or(AppError::Unauthorized)?;
-        Ok(AuthUser {
-            id: claims.sub.clone(),
-            username: claims.username.clone(),
-            name: claims.name.clone(),
-            permissions: claims.permissions.clone(),
-            jti: claims.jti.clone(),
-        })
+            .get::<AuthUser>()
+            .cloned()
+            .ok_or(AppError::Unauthorized)
     }
 }
 

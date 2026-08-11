@@ -157,10 +157,10 @@ pub async fn register(
     .execute(&mut *tx)
     .await?;
 
-    // 首个管理员直接授予全部权限（角色机制已移除）。
+    // 首个管理员绑定 super_admin 内置角色（拥有全部权限）。
     sqlx::query(
-        "INSERT INTO employee_permissions (employee_id, permission_id) \
-         SELECT ?, id FROM permissions",
+        "INSERT INTO employee_roles (employee_id, role_id) \
+         SELECT ?, id FROM roles WHERE code = 'super_admin'",
     )
     .bind(&id)
     .execute(&mut *tx)
@@ -175,14 +175,8 @@ pub async fn register(
 
     tx.commit().await?;
 
-    let permissions: Vec<String> = sqlx::query_scalar(
-        "SELECT p.code FROM permissions p
-         INNER JOIN employee_permissions ep ON p.id = ep.permission_id
-         WHERE ep.employee_id = ?",
-    )
-    .bind(&id)
-    .fetch_all(&state.pool)
-    .await?;
+    let grants = crate::services::permission::resolve_effective_grants(&state.pool, &id).await?;
+    let permissions = crate::services::permission::permission_codes(&grants);
 
     let user_info = LoginUserInfo {
         id,
@@ -269,19 +263,17 @@ async fn issue_session(
     session_id: Option<&str>,
 ) -> Result<Response, AppError> {
     // F-08: 取数据库最新 pwd_version（first_login 改密后已递增，旧令牌全部失效）。
-    let pwd_version: i64 = sqlx::query_scalar("SELECT pwd_version FROM employees WHERE id = ?")
-        .bind(&employee.id)
-        .fetch_one(&state.pool)
-        .await?;
-
-    let permissions: Vec<String> = sqlx::query_scalar(
-        "SELECT p.code FROM permissions p
-         INNER JOIN employee_permissions ep ON p.id = ep.permission_id
-         WHERE ep.employee_id = ?",
+    // 同时取 perm_version：权限相关变更后递增，令牌内权限快照据此失效重算。
+    let (pwd_version, perm_version): (i64, i64) = sqlx::query_as(
+        "SELECT pwd_version, perm_version FROM employees WHERE id = ?",
     )
     .bind(&employee.id)
-    .fetch_all(&state.pool)
+    .fetch_one(&state.pool)
     .await?;
+
+    let grants =
+        crate::services::permission::resolve_effective_grants(&state.pool, &employee.id).await?;
+    let permissions = crate::services::permission::permission_codes(&grants);
 
     let session_id = match session_id {
         Some(sid) if !sid.is_empty() => sid.to_string(),
@@ -301,6 +293,8 @@ async fn issue_session(
         &employee.username,
         &employee.name,
         &permissions,
+        &grants,
+        perm_version,
         pwd_version,
         &session_id,
         &state.config.jwt_secret,
@@ -311,6 +305,7 @@ async fn issue_session(
         &employee.id,
         &employee.username,
         &employee.name,
+        perm_version,
         pwd_version,
         &session_id,
         &state.config.jwt_secret,

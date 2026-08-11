@@ -1,8 +1,8 @@
 # Manner_Web
 
-> 内部企业管理系统：员工管理 + 员工级直接授权 + 站内聊天 + 系统设置。
+> 内部企业管理系统：员工管理 + 角色权限（RBAC + 数据范围 + 部门角色继承） + 站内聊天 + 系统设置。
 
-Manner_Web 是面向企业内部的 Web 管理系统，将员工管理、权限控制、站内聊天与系统设置整合到同一平台。采用前后端分离架构：后端为 Rust（axum）REST API，前端为 SvelteKit 5 构建的纯 SPA 静态站点。权限只通过**员工级直接授权**（权限直接授予到员工个体，无角色/部门中间层）实现，无部门管理、无角色管理。
+Manner_Web 是面向企业内部的 Web 管理系统，将员工管理、权限控制、站内聊天与系统设置整合到同一平台。采用前后端分离架构：后端为 Rust（axum）REST API，前端为 SvelteKit 5 构建的纯 SPA 静态站点。权限采用 **RBAC + 数据范围 + 部门角色继承** 模型：权限经角色授予（员工直接分配 + 部门绑定 + 父子角色继承），并支持数据范围（全部/本部门及子部门/本部门/仅本人/指定部门），员工级直接授权已移除。
 
 ## 技术栈
 
@@ -10,7 +10,7 @@ Manner_Web 是面向企业内部的 Web 管理系统，将员工管理、权限�
 | --- | --- | --- |
 | 后端 | Rust（axum 0.7 + sqlx 0.8） | REST API；bcrypt 密码哈希、JWT（HS256）双令牌认证；MySQL 异步访问（运行时 SQL） |
 | 前端 | SvelteKit 5 + Svelte 5 + Vite 8 + TypeScript 5 | 纯 SPA（adapter-static，`ssr=false`）；UI 组件全部自研，无 antd/React 运行时依赖 |
-| 数据库 | MySQL 8 | utf8mb4 / InnoDB；9 张表；`backend/sql/init.sql` 启动时幂等执行建表 |
+| 数据库 | MySQL 8 | utf8mb4 / InnoDB；15 张表；`backend/sql/init.sql` 启动时幂等执行建表 |
 | 部署 | Nginx + 后端二进制 + MySQL | 静态产物托管 + `/api`、`/uploads` 反向代理；运行期无需 Node.js |
 
 ## 目录结构
@@ -24,7 +24,7 @@ Manner_Web/
 │   ├── logs/         #   运行日志目录（运行期生成，不入库）
 │   └── .env.example  #   环境变量模板（复制为 .env 使用）
 ├── frontend/         # SvelteKit 5 前端
-│   ├── src/routes/   #   页面路由（login / chat / employees / logs / profile / settings 等）
+│   ├── src/routes/   #   页面路由（login / chat / employees / departments / roles / logs / profile / settings 等）
 │   ├── src/lib/      #   api / stores / components / types / icons / styles
 │   ├── svelte.config.js  # adapter-static（fallback index.html）
 │   └── vite.config.ts    # 开发代理 /api、/uploads → 后端
@@ -94,7 +94,7 @@ cargo run
 
 ### 首个管理员
 
-**首个管理员**指全新部署（`employees` 表为空）时通过前端注册页创建的第一个账号：系统注册开关 `registration_open` 默认开启，注册成功后自动给该账号授予全部权限并将注册开关关闭；此后注册一律返回 403。
+**首个管理员**指全新部署（`employees` 表为空）时通过前端注册页创建的第一个账号：系统注册开关 `registration_open` 默认开启，注册成功后自动绑定内置 `super_admin` 角色（全量权限 + all 数据范围）并将注册开关关闭；此后注册一律返回 403。
 
 ## 部署
 

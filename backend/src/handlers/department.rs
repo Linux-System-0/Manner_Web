@@ -56,12 +56,16 @@ async fn validate_parent(
                     "上级部门不能是其子部门（形成循环）".to_string(),
                 ));
             }
-            let parent: Option<String> =
-                sqlx::query_scalar("SELECT parent_id FROM departments WHERE id = ?")
-                    .bind(&cur)
-                    .fetch_optional(pool)
-                    .await?;
-            current = parent;
+            // 注意：parent_id 为 NULL 时须以 Option<Option<String>> 解码，
+            // 否则 String 解码器对 NULL 单元格报 UnexpectedNull。
+            let parent: Option<Option<String>> =
+                sqlx::query_scalar::<_, Option<String>>(
+                    "SELECT parent_id FROM departments WHERE id = ?",
+                )
+                .bind(&cur)
+                .fetch_optional(pool)
+                .await?;
+            current = parent.flatten();
         }
     }
     Ok(())
@@ -79,6 +83,9 @@ pub async fn list_departments(
          (SELECT GROUP_CONCAT(e.name ORDER BY e.name SEPARATOR '、') \
           FROM department_leaders dl JOIN employees e ON e.id = dl.employee_id \
           WHERE dl.department_id = d.id) AS leader_names, \
+         (SELECT GROUP_CONCAT(r.name ORDER BY r.created_at SEPARATOR '、') \
+          FROM department_roles dr JOIN roles r ON r.id = dr.role_id \
+          WHERE dr.department_id = d.id) AS role_names, \
          (SELECT COUNT(*) FROM employee_departments ed WHERE ed.department_id = d.id) AS member_count \
          FROM departments d \
          ORDER BY d.sort_order, d.created_at",
@@ -95,6 +102,7 @@ pub async fn list_departments(
                 "name": row.name,
                 "parent_id": row.parent_id,
                 "leader_names": row.leader_names,
+                "role_names": row.role_names,
                 "member_count": row.member_count,
                 "sort_order": row.sort_order,
             })
@@ -326,6 +334,11 @@ pub async fn update_department(
 
     tx.commit().await?;
 
+    // 部门结构变化影响 subtree 数据范围，全体员工 perm_version 递增（部门编辑低频，代价可接受）。
+    sqlx::query("UPDATE employees SET perm_version = perm_version + 1")
+        .execute(&state.pool)
+        .await?;
+
     append_log(
         &state.config.log_file,
         &format!("用户 {} 更新了部门 {}", user_tag(&auth.name, &auth.username), id),
@@ -366,6 +379,11 @@ pub async fn delete_department(
     }
 
     // 负责人与成员关联由外键级联清理。
+    // 部门删除影响 subtree 数据范围，全体员工 perm_version 递增。
+    sqlx::query("UPDATE employees SET perm_version = perm_version + 1")
+        .execute(&state.pool)
+        .await?;
+
     append_log(
         &state.config.log_file,
         &format!("用户 {} 删除了部门 {}", user_tag(&auth.name, &auth.username), id),
@@ -426,6 +444,12 @@ pub async fn update_employee_departments(
             .await?;
     }
     tx.commit().await?;
+
+    // 部门归属变更影响该员工的部门角色继承与数据范围，递增 perm_version 即时生效。
+    sqlx::query("UPDATE employees SET perm_version = perm_version + 1 WHERE id = ?")
+        .bind(&employee_id)
+        .execute(&state.pool)
+        .await?;
 
     append_log(
         &state.config.log_file,

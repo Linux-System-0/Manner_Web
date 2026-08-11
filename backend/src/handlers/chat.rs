@@ -682,13 +682,10 @@ pub async fn block_user(
     if body.blocked_id == auth.id {
         return Err(AppError::BadRequest("不能拉黑自己".to_string()));
     }
-    let protected: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM employees WHERE id = ? AND protect_block = 1",
-    )
-    .bind(&body.blocked_id)
-    .fetch_one(&state.pool)
-    .await?;
-    if protected > 0 {
+    // 防拉黑保护：目标员工有效权限含 chat:protect_block 则不可拉黑（角色/部门角色派生）。
+    let target_grants =
+        crate::services::permission::resolve_effective_grants(&state.pool, &body.blocked_id).await?;
+    if crate::services::permission::has_permission(&target_grants, "chat:protect_block") {
         return Err(AppError::BadRequest("该用户受保护，无法拉黑".to_string()));
     }
     sqlx::query("INSERT IGNORE INTO blocked_users (blocker_id, blocked_id) VALUES (?, ?)")
@@ -772,13 +769,22 @@ pub async fn list_employees_for_chat(
     State(state): State<AppState>,
     auth: AuthUser,
 ) -> Result<Json<ApiResponse<Vec<ParticipantInfo>>>, AppError> {
-    // 部门数据范围机制已移除：聊天名单对所有登录用户可见（用于发起会话/拉人）。
-    let rows: Vec<ParticipantInfo> = sqlx::query_as(
-        "SELECT id, name, NULL AS role, NULL AS nickname, avatar FROM employees WHERE id != ? ORDER BY name",
-    )
-    .bind(&auth.id)
-    .fetch_all(&state.pool)
-    .await?;
+    // 聊天名单按 employee:view 数据范围过滤：持有该权限的用户仅看到范围内员工；
+    // 未持有 employee:view 的用户不受限制（聊天功能保持可用）。
+    let scope =
+        crate::services::permission::build_scope(&state.pool, &auth.grants, "employee:view", &auth.id)
+            .await?;
+
+    let mut qb: sqlx::QueryBuilder<'_, sqlx::MySql> = sqlx::QueryBuilder::new(
+        "SELECT id, name, NULL AS role, NULL AS nickname, avatar FROM employees e WHERE e.id != ",
+    );
+    qb.push_bind(&auth.id);
+    if let Some(scope) = &scope {
+        crate::services::permission::apply_scope_filter(&mut qb, scope, "e");
+    }
+    qb.push(" ORDER BY name");
+
+    let rows: Vec<ParticipantInfo> = qb.build_query_as().fetch_all(&state.pool).await?;
 
     Ok(Json(ApiResponse::ok(rows)))
 }

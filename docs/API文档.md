@@ -88,32 +88,39 @@
 
 ---
 
-## 二、权限码表（11 个）
+## 二、权限码表（19 个）
 
-权限经 `employee_permissions` 表**直接授予员工**（员工级直接授权，角色机制已移除），不再有角色/部门分组。access 令牌签发时从数据库读取员工全部权限码写入令牌，权限变更后最长 30 分钟（令牌有效期）内自动生效。
+权限经**角色授权**派生（RBAC + 数据范围 + 部门角色继承，见 [权限系统设计.md](./权限系统设计.md)），员工级直接授权已移除。access 令牌内嵌授权快照（`permissions` + `grants` + `perm_version`），权限变更后 `perm_version` 失配即由中间件重算，**即时生效**。
 
 | 模块 | code | 名称 | 校验的端点 |
 | --- | --- | --- | --- |
-| employee | employee:list | 查看员工列表 | GET /api/employees、GET /api/permissions |
-| employee | employee:view | 查看员工详情 | GET /api/employees/:id |
+| employee | employee:list | 查看员工列表 | GET /api/employees（数据范围过滤） |
+| employee | employee:view | 查看员工详情 | GET /api/employees/:id（数据范围过滤） |
 | employee | employee:create | 新增员工 | POST /api/employees |
-| employee | employee:edit | 编辑员工 | PUT /api/employees/:id、PUT /api/employees/:id/permissions |
+| employee | employee:edit | 编辑员工 | PUT /api/employees/:id、PUT /api/employees/:id/departments |
 | employee | employee:delete | 删除员工 | DELETE /api/employees/:id |
 | employee | employee:password | 重置员工密码 | PUT /api/employees/:id/password |
-| chat | chat:protect_block | 防拉黑保护 | 权限矩阵勾选即置位（PUT /api/employees/:id/permissions 联动） |
+| employee | employee:view_sensitive | 查看敏感信息 | POST /api/employees/:id/sensitive（数据范围过滤） |
+| department | department:list | 查看部门列表 | GET /api/departments |
+| department | department:view | 查看部门详情 | GET /api/departments/:id/members |
+| department | department:create | 新增部门 | POST /api/departments |
+| department | department:edit | 编辑部门 | PUT /api/departments/:id |
+| department | department:delete | 删除部门 | DELETE /api/departments/:id |
+| role | role:manage | 角色管理 | GET/POST /api/roles、PUT/DELETE /api/roles/:id、PUT /api/employees/:id/roles、GET/PUT /api/departments/:id/roles、GET /api/permissions |
+| chat | chat:protect_block | 防拉黑保护 | 目标有效权限含该码则不可被拉黑（POST /api/chat/block） |
 | chat | chat:upload | 上传文件 | POST /api/upload/file |
-| chat | chat:group_create | 群聊创建 | POST /api/chat/conversations（创建群聊） |
+| chat | chat:group_create | 群聊创建 | POST /api/chat/conversations |
 | system | system:settings | 系统设置 | GET /api/system/health、GET/PUT /api/system/settings、GET /api/system/logs |
 | system | system:config | 系统配置 | 种子保留码，当前无端点校验 |
 
 说明：
 
 - `system:config` 为种子预留码，当前**没有端点校验**，保留以备后续功能。
-- 首个管理员：系统初始时（`registration_open=1` 且员工表为空）经 `POST /api/auth/register` 注册，注册成功即被授予**全部权限码**，并关闭注册通道（`registration_open` 置 `0`）。
+- 首个管理员：系统初始时（`registration_open=1` 且员工表为空）经 `POST /api/auth/register` 注册，注册成功即绑定内置 `super_admin` 角色（全量权限、all 范围），并关闭注册通道（`registration_open` 置 `0`）。
 
 ---
 
-## 三、路由总表（39 个 + /uploads 静态）
+## 三、路由总表（54 个 + /uploads 静态）
 
 ### 匿名（6 个）
 
@@ -126,7 +133,7 @@
 | 5 | POST | /api/auth/refresh | 匿名（需 refresh 令牌） | auth::refresh |
 | 6 | GET | /api/system/login-page | 匿名 | system::get_login_page_settings |
 
-### 受保护（33 个）
+### 受保护（48 个）
 
 | # | 方法 | 路径 | 权限 | Handler |
 | --- | --- | --- | --- | --- |
@@ -137,32 +144,47 @@
 | 11 | GET | /api/auth/me | 登录 | auth::me |
 | 12 | GET | /api/auth/preferences | 登录 | auth::get_preferences |
 | 13 | PUT | /api/auth/preferences | 登录 | auth::update_preferences |
-| 14 | GET | /api/employees | employee:list | employee::list_employees |
+| 14 | GET | /api/employees | employee:list（数据范围） | employee::list_employees |
 | 15 | POST | /api/employees | employee:create | employee::create_employee |
-| 16 | GET | /api/employees/:id | employee:view | employee::get_employee |
+| 16 | GET | /api/employees/:id | employee:view（数据范围） | employee::get_employee |
 | 17 | PUT | /api/employees/:id | employee:edit | employee::update_employee |
 | 18 | DELETE | /api/employees/:id | employee:delete | employee::delete_employee |
-| 19 | PUT | /api/employees/:id/password | employee:password | employee::reset_password |
-| 20 | PUT | /api/employees/:id/permissions | employee:edit | employee::update_employee_permissions |
-| 21 | GET | /api/permissions | employee:list | system::list_permissions |
-| 22 | POST | /api/upload | 登录（图片，100MB 上限） | system::upload |
-| 23 | POST | /api/upload/file | chat:upload（100MB 上限） | system::upload_file |
-| 24 | GET | /api/system/logs | system:settings | system::logs |
-| 25 | PUT | /api/system/settings | system:settings | system::update_settings |
-| 26 | GET | /api/chat/conversations | 登录 | chat::list_conversations |
-| 27 | POST | /api/chat/conversations | chat:group_create | chat::create_group_conversation |
-| 28 | GET | /api/chat/conversations/:id/messages | 登录 + 会话成员 | chat::get_messages |
-| 29 | POST | /api/chat/conversations/:id/messages | 登录 + 会话成员 | chat::send_message |
-| 30 | PUT | /api/chat/conversations/:id/name | 登录 + 群管理员 | chat::update_group_name |
-| 31 | POST | /api/chat/conversations/:id/participants | 登录 + 群管理员 | chat::add_participant |
-| 32 | PUT | /api/chat/conversations/:id/participants/:target_id | 登录（群：管理员可操作他人/本人；单聊：仅本人） | chat::update_participant |
-| 33 | DELETE | /api/chat/conversations/:id/participants/:target_id | 登录 + 群管理员 | chat::remove_participant |
-| 34 | DELETE | /api/chat/conversations/:id/disband | 登录 + 群管理员 | chat::disband_group |
-| 35 | POST | /api/chat/block | 登录 | chat::block_user |
-| 36 | DELETE | /api/chat/block/:id | 登录 | chat::unblock_user |
-| 37 | GET | /api/chat/blocked | 登录 | chat::list_blocked |
-| 38 | GET | /api/chat/employees | 登录 | chat::list_employees_for_chat |
-| 39 | GET | /api/chat/file/:name | 登录 + 相关会话成员 | chat::get_chat_file |
+| 19 | POST | /api/employees/:id/sensitive | employee:view_sensitive（数据范围） | employee::view_sensitive_info |
+| 20 | POST | /api/employees/:id/sensitive/:field | employee:view_sensitive（数据范围） | employee::view_sensitive_field |
+| 21 | PUT | /api/employees/:id/password | employee:password | employee::reset_password |
+| 22 | PUT | /api/employees/:id/departments | employee:edit | department::update_employee_departments |
+| 23 | PUT | /api/employees/:id/roles | role:manage | role::update_employee_roles |
+| 24 | GET | /api/roles | role:manage | role::list_roles |
+| 25 | POST | /api/roles | role:manage | role::create_role |
+| 26 | PUT | /api/roles/:id | role:manage | role::update_role |
+| 27 | DELETE | /api/roles/:id | role:manage | role::delete_role |
+| 28 | GET | /api/departments/:id/roles | role:manage | role::list_department_roles |
+| 29 | PUT | /api/departments/:id/roles | role:manage | role::update_department_roles |
+| 30 | GET | /api/departments | department:list | department::list_departments |
+| 31 | POST | /api/departments | department:create | department::create_department |
+| 32 | PUT | /api/departments/:id | department:edit | department::update_department |
+| 33 | DELETE | /api/departments/:id | department:delete | department::delete_department |
+| 34 | GET | /api/departments/:id/members | department:view | department::list_department_members |
+| 35 | GET | /api/permissions | role:manage | system::list_permissions |
+| 36 | POST | /api/upload | 登录（图片，100MB 上限） | system::upload |
+| 37 | POST | /api/upload/file | chat:upload（100MB 上限） | system::upload_file |
+| 38 | GET | /api/system/logs | system:settings | system::logs |
+| 39 | PUT | /api/system/settings | system:settings | system::update_settings |
+| 40 | GET | /api/chat/conversations | 登录 | chat::list_conversations |
+| 41 | POST | /api/chat/conversations | chat:group_create | chat::create_group_conversation |
+| 42 | GET | /api/chat/direct/:peer_id | 登录 | chat::get_or_create_direct_conversation |
+| 43 | GET | /api/chat/conversations/:id/messages | 登录 + 会话成员 | chat::get_messages |
+| 44 | POST | /api/chat/conversations/:id/messages | 登录 + 会话成员 | chat::send_message |
+| 45 | PUT | /api/chat/conversations/:id/name | 登录 + 群管理员 | chat::update_group_name |
+| 46 | POST | /api/chat/conversations/:id/participants | 登录 + 群管理员 | chat::add_participant |
+| 47 | PUT | /api/chat/conversations/:id/participants/:target_id | 登录（群：管理员可操作他人/本人；单聊：仅本人） | chat::update_participant |
+| 48 | DELETE | /api/chat/conversations/:id/participants/:target_id | 登录 + 群管理员 | chat::remove_participant |
+| 49 | DELETE | /api/chat/conversations/:id/disband | 登录 + 群管理员 | chat::disband_group |
+| 50 | POST | /api/chat/block | 登录 | chat::block_user |
+| 51 | DELETE | /api/chat/block/:id | 登录 | chat::unblock_user |
+| 52 | GET | /api/chat/blocked | 登录 | chat::list_blocked |
+| 53 | GET | /api/chat/employees | 登录（employee:view 持有者按数据范围过滤） | chat::list_employees_for_chat |
+| 54 | GET | /api/chat/file/:name | 登录 + 相关会话成员 | chat::get_chat_file |
 
 ### 静态资源
 
@@ -357,18 +379,18 @@
 
 | 字段 | 说明 |
 | --- | --- |
-| items | 员工行数组（id/username/name/title/email/phone/id_number/address/avatar/hire_date/status/protect_block/created_at） |
+| items | 员工行数组（id/username/name/title/email/phone/id_number/address/avatar/hire_date/status/created_at）；按 `employee:list` 数据范围过滤 |
 | total / page / page_size | 总数与分页信息 |
 
 按 `created_at DESC` 排序。错误场景：`40004`。
 
 #### GET /api/employees/:id
 
-权限：employee:view。员工详情。
+权限：employee:view。员工详情（目标不在数据范围内按 `40006` 处理，防探测）。
 
-成功响应 `data`：列表行全部字段 + `permissions`（权限码数组）+ `updated_at`。
+成功响应 `data`：列表行全部字段 + `permissions`（有效权限码数组）+ `grants`（有效授权，含数据范围）+ `department_ids` + `role_ids`（分配的角色）+ `updated_at`。
 
-错误场景：`40006`（不存在）、`40004`。
+错误场景：`40006`（不存在/不可见）、`40004`。
 
 #### POST /api/employees
 
@@ -420,7 +442,7 @@
 
 权限：employee:delete。删除员工。
 
-特殊行为：不能删除自己（`40000`「不能删除自己」）；删除后其 `employee_permissions` 记录随外键 CASCADE 清除。
+特殊行为：不能删除自己（`40000`「不能删除自己」）；删除后其 `employee_roles`、`employee_departments` 等关联随外键 CASCADE 清除。
 
 错误场景：`40000`、`40006`、`40004`。
 
@@ -438,23 +460,39 @@
 
 错误场景：`40000`、`40006`、`40004`。
 
-#### PUT /api/employees/:id/permissions
+#### PUT /api/employees/:id/roles
 
-权限：employee:edit。覆盖式更新员工权限。
+权限：role:manage。整体替换员工分配的角色（RBAC）。
 
 请求体：
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| permission_codes | string[] | 是 | 授权后的完整权限码集合（覆盖式） |
+| role_ids | string[] | 是 | 分配后的完整角色 id 集合（覆盖式；空数组表示清空） |
 
 特殊行为：
 
-- 不能修改自己的权限（`40000`「不能修改自己的权限」）。
-- **新权限必须是操作者自身权限的子集**，否则 `40004`（防受限管理员提权）。
-- 事务内先 DELETE 全量删除再逐条重插；响应「权限已更新」。
+- 不能修改自己的角色（`40000`「不能修改自己的角色」）。
+- **防提权**：目标角色有效授权（含父角色继承）必须是操作者自身授权的子集，否则 `40004`。
+- **super_admin 保护**：移除后系统须至少保留一名超级管理员，否则 `40000`。
+- 成功后目标员工 `perm_version` 递增，其权限变更即时生效（无需重登）。
 
 错误场景：`40000`、`40004`、`40006`。
+
+#### 角色管理（role:manage）
+
+| 端点 | 说明 |
+| --- | --- |
+| GET /api/roles | 角色列表（含权限码、范围、成员数） |
+| POST /api/roles | 创建角色：`{ name, code, parent_id?, scope_type, description?, permission_codes[], scope_department_ids[] }` |
+| PUT /api/roles/:id | 更新角色（名称/父角色/范围/权限码/指定部门）；`is_system` 角色仅允许改描述 |
+| DELETE /api/roles/:id | 删除角色（`is_system` 拒绝、有子角色拒绝） |
+| GET /api/departments/:id/roles | 部门绑定的角色列表 |
+| PUT /api/departments/:id/roles | 整体替换部门绑定的角色：`{ role_ids[] }`（super_admin 不允许经部门绑定） |
+
+`scope_type`：`all`（全部）/ `subtree`（本部门及子部门）/ `department`（本部门）/ `self`（仅本人）/ `custom`（指定部门，须携带 `scope_department_ids`）。
+
+防提权约束：角色权限集 ⊆ 操作者授权；数据范围 ≤ 操作者范围；父子角色子范围不得大于父范围；父角色沿 `parent_id` 防环。角色变更会批量递增受影响员工的 `perm_version`（即时生效）。
 
 ### 4.3 聊天模块（chat）
 
@@ -601,7 +639,7 @@
 
 登录。聊天可用员工名单（发起会话/拉人用）。
 
-成功响应 `data`：全量员工（除自己外）`ParticipantInfo[]`，按 `name` 排序（无部门数据范围过滤）。
+成功响应 `data`：员工（除自己外）`ParticipantInfo[]`，按 `name` 排序。持有 `employee:view` 的用户按该权限的数据范围过滤（仅见范围内员工），未持有者全量可见。
 
 #### GET /api/chat/file/:name
 
@@ -693,7 +731,7 @@
 
 #### GET /api/permissions
 
-权限：employee:list。权限字典（按模块分组，供授权界面使用）。
+权限：role:manage。权限字典（按模块分组，供角色管理界面勾选权限使用）。
 
 成功响应 `data`：
 
@@ -764,6 +802,6 @@
 
 ### 6.6 数据库与权限文档
 
-- 表结构以 [数据库设计.md](./数据库设计.md) 为准（9 张表，无部门/角色表）。
-- 权限模型细节见 [权限系统设计.md](./权限系统设计.md)（员工级直接授权，11 个权限码）。
+- 表结构以 [数据库设计.md](./数据库设计.md) 为准（15 张表，RBAC + 部门角色 + 数据范围）。
+- 权限模型细节见 [权限系统设计.md](./权限系统设计.md)（RBAC + 数据范围 + 部门角色继承，19 个权限码）与 [权限系统重构方案.md](./权限系统重构方案.md)。
 - 前端部署与代理细节见根目录 [README](../README.md) 与 [`nginx-prod.conf.example`](./nginx-prod.conf.example)。

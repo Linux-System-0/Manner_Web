@@ -32,6 +32,12 @@ async fn main() {
         Err(e) => tracing::error!(error = ?e, "敏感字段加密迁移失败"),
     }
 
+    // 存量「员工级直接授权」→ 角色授权迁移（employee_permissions 表存在时执行，幂等）。
+    match migrate_direct_permissions(&pool).await {
+        Ok(()) => tracing::info!("直接授权迁移完成（employee_permissions 已移除）"),
+        Err(e) => tracing::error!(error = ?e, "直接授权迁移失败"),
+    }
+
     // F-01: 预生成与 BCRYPT_COST 同开销的假哈希，供登录「用户名不存在」分支做等时校验。
     let login_dummy_hash = crate::services::auth::hash_password(
         &uuid::Uuid::new_v4().to_string(),
@@ -111,6 +117,97 @@ fn init_logging(level: &str) {
             .with_target(true)
             .init();
     }
+}
+
+/// 存量「员工级直接授权」→ 角色授权迁移（一次性、幂等）：
+/// - 持有全部权限的员工绑定 super_admin 内置角色；
+/// - 其余持有部分权限的员工生成私有角色（role id 取员工 id）承载其权限；
+/// - 全员 perm_version 递增强制下次请求重算有效授权；
+/// - 迁移完成后 DROP employee_permissions 表（下次启动表不存在则跳过）。
+async fn migrate_direct_permissions(pool: &sqlx::MySqlPool) -> Result<(), anyhow::Error> {
+    let has_table: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM information_schema.TABLES \
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'employee_permissions'",
+    )
+    .fetch_one(pool)
+    .await?;
+    if has_table == 0 {
+        return Ok(());
+    }
+
+    // super_admin 判定基准：持有「重构前全部权限码」的存量员工视为原管理员。
+    // 本次重构新增 role:manage，旧管理员不可能持有它，须将其排除在基准外。
+    let total_legacy: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM permissions WHERE code != 'role:manage'")
+            .fetch_one(pool)
+            .await?;
+
+    if total_legacy > 0 {
+        // 1) 持有全部存量权限 → super_admin
+        sqlx::query(
+            "INSERT IGNORE INTO employee_roles (employee_id, role_id) \
+             SELECT ep.employee_id, '00000000-0000-0000-0000-000000000001' \
+             FROM employee_permissions ep \
+             GROUP BY ep.employee_id \
+             HAVING COUNT(DISTINCT ep.permission_id) = ?",
+        )
+        .bind(total_legacy)
+        .execute(pool)
+        .await?;
+
+        // 2) 其余持有部分权限 → 私有角色
+        let rows: Vec<(String, String)> = sqlx::query_as(
+            "SELECT ep.employee_id, e.username \
+             FROM employee_permissions ep \
+             JOIN employees e ON e.id = ep.employee_id \
+             GROUP BY ep.employee_id, e.username \
+             HAVING COUNT(DISTINCT ep.permission_id) < ?",
+        )
+        .bind(total_legacy)
+        .fetch_all(pool)
+        .await?;
+
+        for (emp_id, username) in rows {
+            sqlx::query(
+                "INSERT IGNORE INTO roles (id, name, code, is_system, scope_type, description) \
+                 VALUES (?, ?, ?, 0, 'all', '存量直接授权迁移生成的私有角色')",
+            )
+            .bind(&emp_id)
+            .bind(format!("直接授权-{}", username))
+            .bind(format!("priv_{}", emp_id))
+            .execute(pool)
+            .await?;
+
+            sqlx::query(
+                "INSERT IGNORE INTO role_permissions (role_id, permission_id) \
+                 SELECT ?, permission_id FROM employee_permissions WHERE employee_id = ?",
+            )
+            .bind(&emp_id)
+            .bind(&emp_id)
+            .execute(pool)
+            .await?;
+
+            sqlx::query(
+                "INSERT IGNORE INTO employee_roles (employee_id, role_id) VALUES (?, ?)",
+            )
+            .bind(&emp_id)
+            .bind(&emp_id)
+            .execute(pool)
+            .await?;
+        }
+    }
+
+    // 3) 全员 perm_version 递增，强制下次请求重算有效授权（即时生效）。
+    sqlx::query("UPDATE employees SET perm_version = perm_version + 1")
+        .execute(pool)
+        .await?;
+
+    // 4) 移除旧的直接授权表。
+    sqlx::query("DROP TABLE employee_permissions")
+        .execute(pool)
+        .await?;
+
+    Ok(())
 }
 
 async fn run_migrations(pool: &sqlx::MySqlPool) {

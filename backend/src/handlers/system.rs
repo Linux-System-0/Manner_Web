@@ -541,13 +541,12 @@ pub async fn logs(
     }))))
 }
 
-/// 权限字典列表（按模块分组）。供员工直接授权界面使用。
-/// 原角色模块的 list_permissions 迁移至此：角色机制已移除，权限只通过 employee_permissions 直授。
+/// 权限字典列表（按模块分组）。供角色管理界面（role:manage）勾选权限使用。
 pub async fn list_permissions(
     State(state): State<AppState>,
     auth: AuthUser,
 ) -> Result<Json<ApiResponse<serde_json::Value>>, AppError> {
-    require_permission(&auth.permissions, "employee:list")?;
+    require_permission(&auth.permissions, "role:manage")?;
 
     let permissions: Vec<Permission> = sqlx::query_as(
         "SELECT id, code, name, module FROM permissions ORDER BY module, id",
@@ -575,6 +574,7 @@ pub async fn list_permissions(
                 "department" => "部门管理".to_string(),
                 "system" => "系统设置".to_string(),
                 "chat" => "聊天".to_string(),
+                "role" => "角色管理".to_string(),
                 _ => perm.module.clone(),
             };
         }

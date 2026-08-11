@@ -15,7 +15,8 @@
     updateEmployeeDepartments,
   } from '$lib/api/departments'
   import { getEmployees, getEmployee } from '$lib/api/employees'
-  import type { Department, DepartmentMember, Employee } from '$lib/types'
+  import { getRoles, getDepartmentRoles, updateDepartmentRoles } from '$lib/api/roles'
+  import type { Department, DepartmentMember, Employee, Role } from '$lib/types'
   import Card from '$lib/components/Card.svelte'
   import Tree from '$lib/components/Tree.svelte'
   import type { TreeNode } from '$lib/components/Tree.svelte'
@@ -55,6 +56,41 @@
     $authStore.permissions.includes('employee:edit') &&
       $authStore.permissions.includes('employee:view'),
   )
+  let canManageRoles = $derived($authStore.permissions.includes('role:manage'))
+
+  // 部门角色绑定弹窗
+  let roleModal = $state({ open: false, deptId: '', deptName: '' })
+  let roleList = $state<Role[]>([])
+  let selectedDeptRoleIds = $state<string[]>([])
+  let savingDeptRoles = $state(false)
+
+  async function openDeptRoles(d: Department) {
+    roleModal = { open: true, deptId: d.id, deptName: d.name }
+    selectedDeptRoleIds = []
+    const [roleRes, deptRoleRes] = await Promise.all([getRoles(), getDepartmentRoles(d.id)])
+    if (roleRes.code === 0) roleList = roleRes.data.items
+    if (deptRoleRes.code === 0) {
+      selectedDeptRoleIds = deptRoleRes.data.items.map((r) => r.id)
+    }
+  }
+
+  async function handleSaveDeptRoles() {
+    savingDeptRoles = true
+    try {
+      const res = await updateDepartmentRoles(roleModal.deptId, selectedDeptRoleIds)
+      if (res.code !== 0) {
+        message.error(res.message || '保存角色失败')
+        return
+      }
+      message.success('角色绑定已更新')
+      roleModal.open = false
+      fetchDepartments()
+    } catch (err: unknown) {
+      message.error(getApiError(err, '保存角色失败'))
+    } finally {
+      savingDeptRoles = false
+    }
+  }
 
   function buildTree(list: Department[]): TreeNode[] {
     const map = new Map<string, Department>()
@@ -64,7 +100,7 @@
     for (const d of list) {
       const node: TreeNode = {
         key: d.id,
-        title: `${d.name}${d.member_count > 0 ? ` (${d.member_count})` : ''}${d.leader_names ? ` · 负责人:${d.leader_names}` : ''}`,
+        title: `${d.name}${d.member_count > 0 ? ` (${d.member_count})` : ''}${d.leader_names ? ` · 负责人:${d.leader_names}` : ''}${d.role_names ? ` · 角色:${d.role_names}` : ''}`,
       }
       if (d.parent_id && map.has(d.parent_id)) {
         const arr = childrenOf.get(d.parent_id) || []
@@ -448,6 +484,14 @@
                   <Icon name="team" style="font-size:14px" />成员
                 </Button>
               {/if}
+              {#if canManageRoles}
+                <Button type="link" size="small" tooltip="绑定该部门自动继承的角色" onClick={() => {
+                  const d = depts.find((x) => x.id === node.key)
+                  if (d) openDeptRoles(d)
+                }}>
+                  <Icon name="lock" style="font-size:14px" />角色
+                </Button>
+              {/if}
               {#if canCreate}
                 <Button type="link" size="small" tooltip="在该部门下创建子部门" onClick={() => openCreate(node.key)}>
                   <Icon name="plus" style="font-size:14px" />子部门
@@ -532,8 +576,7 @@
     onclose={() => (memberModal.open = false)}
     width={760}
     bodyStyle="padding:16px 24px"
-  >
-    {#snippet footer()}
+  >    {#snippet footer()}
       <Button tooltip="关闭弹窗" onClick={() => (memberModal.open = false)}>关闭</Button>
     {/snippet}
 
@@ -566,5 +609,48 @@
       loading={loadingMembers}
       snippets={{ status, leader, action }}
     />
+  </Modal>
+
+  <!-- 部门角色绑定弹窗 -->
+  <Modal
+    open={roleModal.open}
+    title={`部门角色绑定 - ${roleModal.deptName}`}
+    onclose={() => (roleModal.open = false)}
+    width={560}
+    bodyStyle="padding:16px 24px"
+  >
+    {#snippet footer()}
+      <Button tooltip="关闭弹窗，不保存修改" onClick={() => (roleModal.open = false)}>取消</Button>
+      <Button type="primary" tooltip="保存部门角色绑定" loading={savingDeptRoles} onClick={handleSaveDeptRoles}>保存</Button>
+    {/snippet}
+    <span style="color:var(--ant-color-text-secondary);display:block;margin-bottom:12px">
+      绑定后，该部门所有员工自动获得所选角色的权限（super_admin 不允许经部门绑定）。
+    </span>
+    {#if roleList.length === 0}
+      <span style="color:var(--ant-color-warning)">暂无可绑定的角色，请先在「角色管理」中创建</span>
+    {:else}
+      <div style="display:flex;flex-direction:column;gap:8px;max-height:320px;overflow-y:auto">
+        {#each roleList as role}
+          <label style="display:flex;align-items:center;gap:8px;padding:10px 12px;border:1px solid var(--ant-color-border-secondary);border-radius:6px;cursor:pointer">
+            <input
+              type="checkbox"
+              style="accent-color:var(--ant-color-primary)"
+              disabled={role.is_system === 1}
+              checked={selectedDeptRoleIds.includes(role.id)}
+              onchange={() => {
+                selectedDeptRoleIds = selectedDeptRoleIds.includes(role.id)
+                  ? selectedDeptRoleIds.filter((id) => id !== role.id)
+                  : [...selectedDeptRoleIds, role.id]
+              }}
+            />
+            <span style="flex:1;font-weight:500">
+              {role.name}
+              {#if role.is_system === 1}<span style="color:var(--ant-color-error);font-size:12px">内置（不可绑定）</span>{/if}
+            </span>
+            <span style="color:var(--ant-color-text-secondary);font-size:12px">{role.permission_codes.length} 项权限</span>
+          </label>
+        {/each}
+      </div>
+    {/if}
   </Modal>
 {/if}

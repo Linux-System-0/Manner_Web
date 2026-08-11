@@ -9,9 +9,9 @@ use crate::middleware::auth::{require_permission, AppState, AuthUser};
 use crate::models::employee::{
     EmployeeDetail, EmployeeListParams, EmployeeListResponse, EmployeeListRow, NewEmployee,
     ResetPasswordRequest, SensitiveEmployeeInfo, UpdateEmployee,
-    UpdateEmployeePermissionsRequest,
 };
 use crate::services::auth::hash_password;
+use crate::services::permission::{self, Grant};
 use crate::utils::crypto;
 use crate::utils::response::ApiResponse;
 
@@ -78,13 +78,21 @@ pub async fn list_employees(
         QueryBuilder::new("SELECT COUNT(*) FROM employees e WHERE 1=1");
     let mut query_qb: QueryBuilder<'_, sqlx::MySql> = QueryBuilder::new(
         "SELECT e.id, e.username, e.name, e.title, e.email, e.phone, e.id_number, \
-         e.address, e.avatar, e.hire_date, e.status, e.protect_block, e.created_at, \
+         e.address, e.avatar, e.hire_date, e.status, e.created_at, \
          (SELECT GROUP_CONCAT(d.name ORDER BY d.sort_order, d.created_at SEPARATOR '、') \
           FROM employee_departments ed JOIN departments d ON d.id = ed.department_id \
           WHERE ed.employee_id = e.id) AS departments \
          FROM employees e \
          WHERE 1=1",
     );
+
+    // 数据范围过滤（employee:list）：非 all 范围仅返回范围内员工。
+    if let Some(scope) =
+        permission::build_scope(&state.pool, &auth.grants, "employee:list", &auth.id).await?
+    {
+        permission::apply_scope_filter(&mut count_qb, &scope, "e");
+        permission::apply_scope_filter(&mut query_qb, &scope, "e");
+    }
 
     if let Some(ref keyword) = params.keyword {
         let kw = format!("%{}%", keyword);
@@ -157,9 +165,14 @@ pub async fn get_employee(
 ) -> Result<Json<ApiResponse<EmployeeDetail>>, AppError> {
     require_permission(&auth.permissions, "employee:view")?;
 
+    // 数据范围：employee:view 受范围过滤，不可见时按不存在处理（防探测）。
+    if !permission::is_visible(&state.pool, &auth.grants, "employee:view", &auth.id, &id).await? {
+        return Err(AppError::NotFound);
+    }
+
     let row = sqlx::query_as::<_, EmployeeDetailRow>(
         "SELECT e.id, e.username, e.name, e.title, e.email, e.phone, e.id_number, \
-         e.address, e.avatar, e.hire_date, e.status, e.protect_block, e.created_at, e.updated_at \
+         e.address, e.avatar, e.hire_date, e.status, e.created_at, e.updated_at \
          FROM employees e \
          WHERE e.id = ?",
     )
@@ -168,17 +181,19 @@ pub async fn get_employee(
     .await?
     .ok_or(AppError::NotFound)?;
 
-    let permissions: Vec<String> = sqlx::query_scalar(
-        "SELECT p.code FROM permissions p
-         INNER JOIN employee_permissions ep ON p.id = ep.permission_id
-         WHERE ep.employee_id = ?",
+    // 目标员工的有效授权（码 + 范围）与分配的角色。
+    let grants: Vec<Grant> = permission::resolve_effective_grants(&state.pool, &id).await?;
+    let permissions = permission::permission_codes(&grants);
+
+    let department_ids: Vec<String> = sqlx::query_scalar(
+        "SELECT department_id FROM employee_departments WHERE employee_id = ?",
     )
     .bind(&id)
     .fetch_all(&state.pool)
     .await?;
 
-    let department_ids: Vec<String> = sqlx::query_scalar(
-        "SELECT department_id FROM employee_departments WHERE employee_id = ?",
+    let role_ids: Vec<String> = sqlx::query_scalar(
+        "SELECT role_id FROM employee_roles WHERE employee_id = ?",
     )
     .bind(&id)
     .fetch_all(&state.pool)
@@ -196,9 +211,10 @@ pub async fn get_employee(
         avatar: row.avatar,
         hire_date: row.hire_date,
         status: row.status,
-        protect_block: row.protect_block,
         permissions,
+        grants,
         department_ids,
+        role_ids,
         created_at: row.created_at,
         updated_at: row.updated_at,
     })))
@@ -221,9 +237,22 @@ pub async fn view_sensitive_info(
 
     let ip = client_ip.0;
 
+    // 数据范围：view_sensitive 受范围过滤，不可见时按不存在处理。
+    if !permission::is_visible(
+        &state.pool,
+        &auth.grants,
+        "employee:view_sensitive",
+        &auth.id,
+        &id,
+    )
+    .await?
+    {
+        return Err(AppError::NotFound);
+    }
+
     let row = sqlx::query_as::<_, EmployeeDetailRow>(
         "SELECT e.id, e.username, e.name, e.title, e.email, e.phone, e.id_number, \
-         e.address, e.avatar, e.hire_date, e.status, e.protect_block, e.created_at, e.updated_at \
+         e.address, e.avatar, e.hire_date, e.status, e.created_at, e.updated_at \
          FROM employees e \
          WHERE e.id = ?",
     )
@@ -275,9 +304,22 @@ pub async fn view_sensitive_field(
 
     let ip = client_ip.0;
 
+    // 数据范围：view_sensitive 受范围过滤，不可见时按不存在处理。
+    if !permission::is_visible(
+        &state.pool,
+        &auth.grants,
+        "employee:view_sensitive",
+        &auth.id,
+        &id,
+    )
+    .await?
+    {
+        return Err(AppError::NotFound);
+    }
+
     let row = sqlx::query_as::<_, EmployeeDetailRow>(
         "SELECT e.id, e.username, e.name, e.title, e.email, e.phone, e.id_number, \
-         e.address, e.avatar, e.hire_date, e.status, e.protect_block, e.created_at, e.updated_at \
+         e.address, e.avatar, e.hire_date, e.status, e.created_at, e.updated_at \
          FROM employees e \
          WHERE e.id = ?",
     )
@@ -327,7 +369,6 @@ struct EmployeeDetailRow {
     pub avatar: Option<String>,
     pub hire_date: Option<chrono::NaiveDate>,
     pub status: i8,
-    pub protect_block: i8,
     pub created_at: chrono::NaiveDateTime,
     pub updated_at: chrono::NaiveDateTime,
 }
@@ -628,89 +669,4 @@ pub async fn reset_password(
     .await?;
 
     Ok(Json(ApiResponse::ok_msg("密码已重置")))
-}
-
-pub async fn update_employee_permissions(
-    State(state): State<AppState>,
-    auth: AuthUser,
-    Path(id): Path<String>,
-    Json(body): Json<UpdateEmployeePermissionsRequest>,
-) -> Result<Json<ApiResponse<()>>, AppError> {
-    require_permission(&auth.permissions, "employee:edit")?;
-
-    if id == auth.id {
-        return Err(AppError::BadRequest("不能修改自己的权限".to_string()));
-    }
-
-    let exists = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM employees WHERE id = ?")
-        .bind(&id)
-        .fetch_one(&state.pool)
-        .await?;
-    if exists == 0 {
-        return Err(AppError::NotFound);
-    }
-
-    // F-01: 操作者只能增删「自己拥有的权限」——目标现有但操作者没有的权限冻结保持：
-    //   - 新增（目标当前没有、新集合里有）→ 必须是操作者已有权限，否则 403（防提权）；
-    //   - 移除（目标当前有、新集合里没有）→ 必须是操作者已有权限，否则 403（防降权他人能力）。
-    //   两者都满足时，目标已有但操作者没有的权限被自动保留。
-    let current: Vec<String> = sqlx::query_scalar(
-        "SELECT p.code FROM employee_permissions ep JOIN permissions p ON p.id = ep.permission_id WHERE ep.employee_id = ?",
-    )
-    .bind(&id)
-    .fetch_all(&state.pool)
-    .await?;
-
-    let owned: std::collections::HashSet<&str> =
-        auth.permissions.iter().map(|s| s.as_str()).collect();
-    let new_set: std::collections::HashSet<&str> =
-        body.permission_codes.iter().map(|s| s.as_str()).collect();
-    let cur_set: std::collections::HashSet<&str> = current.iter().map(|s| s.as_str()).collect();
-
-    for code in &new_set {
-        if !cur_set.contains(code) && !owned.contains(code) {
-            return Err(AppError::Forbidden);
-        }
-    }
-    for code in &cur_set {
-        if !new_set.contains(code) && !owned.contains(code) {
-            return Err(AppError::Forbidden);
-        }
-    }
-
-    let mut tx = state.pool.begin().await?;
-    sqlx::query("DELETE FROM employee_permissions WHERE employee_id = ?")
-        .bind(&id)
-        .execute(&mut *tx)
-        .await?;
-
-    for code in &body.permission_codes {
-        let perm_id: Option<i32> = sqlx::query_scalar("SELECT id FROM permissions WHERE code = ?")
-            .bind(code)
-            .fetch_optional(&mut *tx)
-            .await?;
-        if let Some(pid) = perm_id {
-            sqlx::query("INSERT INTO employee_permissions (employee_id, permission_id) VALUES (?, ?)")
-                .bind(&id)
-                .bind(pid)
-                .execute(&mut *tx)
-                .await?;
-        }
-    }
-
-    // 防拉黑保护与权限联动：勾选 chat:protect_block 权限 ⇔ 该员工受保护（protect_block=1）。
-    // 该标记只影响聊天拉黑拦截（见 chat.rs block_user），不影响改密/删除/改权等管理操作。
-    let protect: i8 = if body.permission_codes.iter().any(|c| c == "chat:protect_block") {
-        1
-    } else {
-        0
-    };
-    sqlx::query("UPDATE employees SET protect_block = ? WHERE id = ?")
-        .bind(protect)
-        .bind(&id)
-        .execute(&mut *tx)
-        .await?;
-
-    tx.commit().await?;
-    Ok(Json(ApiResponse::ok_msg("权限已更新")))
 }

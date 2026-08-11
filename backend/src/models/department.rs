@@ -9,6 +9,8 @@ pub struct DepartmentListRow {
     pub parent_id: Option<String>,
     /// 负责人姓名列表（顿号分隔，GROUP_CONCAT 聚合）。
     pub leader_names: Option<String>,
+    /// 绑定角色名称列表（顿号分隔，GROUP_CONCAT 聚合）。
+    pub role_names: Option<String>,
     pub member_count: i64,
     pub sort_order: i32,
 }

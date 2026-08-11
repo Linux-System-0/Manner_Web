@@ -81,13 +81,3 @@ export async function resetPassword(
   })
   return res
 }
-
-export async function updateEmployeePermissions(
-  id: string,
-  permission_codes: string[],
-): Promise<ApiResponse<null>> {
-  const res = await client.put<null>(`/employees/${id}/permissions`, {
-    permission_codes,
-  })
-  return res
-}

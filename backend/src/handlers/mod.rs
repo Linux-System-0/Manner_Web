@@ -2,6 +2,7 @@ pub mod auth;
 pub mod chat;
 pub mod department;
 pub mod employee;
+pub mod role;
 pub mod system;
 
 use axum::Router;
@@ -144,8 +145,14 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/employees/:id/sensitive", post(employee::view_sensitive_info))
         .route("/api/employees/:id/sensitive/:field", post(employee::view_sensitive_field))
         .route("/api/employees/:id/password", put(employee::reset_password))
-        .route("/api/employees/:id/permissions", put(employee::update_employee_permissions))
         .route("/api/employees/:id/departments", put(department::update_employee_departments))
+        .route("/api/employees/:id/roles", put(role::update_employee_roles))
+        .route("/api/roles", get(role::list_roles))
+        .route("/api/roles", post(role::create_role))
+        .route("/api/roles/:id", put(role::update_role))
+        .route("/api/roles/:id", delete(role::delete_role))
+        .route("/api/departments/:id/roles", get(role::list_department_roles))
+        .route("/api/departments/:id/roles", put(role::update_department_roles))
         .route("/api/departments", get(department::list_departments))
         .route("/api/departments", post(department::create_department))
         .route("/api/departments/:id", put(department::update_department))
