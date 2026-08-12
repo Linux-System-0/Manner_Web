@@ -1,3 +1,19 @@
+// Manner_Web - 可以在 Linux 系统上运行的企业管理系统
+// Copyright (C) 2026 Linux-System-0(Github) / 一架在Linux上起飞的A320(Bilibili) <ls0_1@qq.com>
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 /// 校验明文密码与存储哈希是否匹配。
 /// 存储格式统一为服务端 bcrypt(明文密码)，随机盐。不保留任何历史客户端哈希兼容逻辑。
 pub fn verify_password(password: &str, stored_hash: &str) -> bool {

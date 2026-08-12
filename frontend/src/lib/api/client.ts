@@ -1,3 +1,19 @@
+// Manner_Web - 可以在 Linux 系统上运行的企业管理系统
+// Copyright (C) 2026 Linux-System-0(Github) / 一架在Linux上起飞的A320(Bilibili) <ls0_1@qq.com>
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 // 与 axios 版（原 src/api/client.ts）语义等价的自研 fetch 封装：
 // - credentials: 'include' —— 浏览器自动携带 httpOnly Cookie（manner_token / manner_refresh），
 //   前端不持有 JWT，也无需手工附加 Authorization。
