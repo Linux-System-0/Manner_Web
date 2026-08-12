@@ -1,6 +1,7 @@
 <script lang="ts">
   // Alert：警告提示（antd 视觉）
   import type { Snippet } from 'svelte'
+  import { t } from '$lib/i18n'
   import { Icon } from '$lib/icons'
 
   let {
@@ -66,7 +67,7 @@
       class="ant-alert-close-icon"
       role="button"
       tabindex={0}
-      aria-label="关闭"
+      aria-label={t('common.closeBtn')}
       style="cursor:pointer;color:var(--ant-color-text-tertiary);display:inline-flex"
       onclick={onClose}
       onkeydown={(e) => {

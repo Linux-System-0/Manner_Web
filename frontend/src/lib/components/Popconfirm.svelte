@@ -2,16 +2,17 @@
   // Popconfirm：气泡确认（点击触发，二次确认）
   import type { Snippet } from 'svelte'
   import { onMount } from 'svelte'
+  import { t } from '$lib/i18n'
   import Button from './Button.svelte'
   import { Icon } from '$lib/icons'
 
   let {
-    title = '确定执行此操作吗？',
+    title = t('common.confirmOp'),
     description = '',
     onConfirm,
     onCancel,
-    okText = '确定',
-    cancelText = '取消',
+    okText = t('common.ok'),
+    cancelText = t('common.cancel'),
     okDanger = false,
     children,
     disabled = false,
@@ -101,8 +102,8 @@
             </div>
           </div>
           <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">
-            <Button size="small" tooltip="取消操作" onClick={cancel}>{cancelText}</Button>
-            <Button size="small" type="primary" danger={okDanger} loading={loading} tooltip="确认执行该操作" onClick={confirm}>{okText}</Button>
+            <Button size="small" tooltip={t('common.cancelOp')} onClick={cancel}>{cancelText}</Button>
+            <Button size="small" type="primary" danger={okDanger} loading={loading} tooltip={t('common.confirmOp')} onClick={confirm}>{okText}</Button>
           </div>
         </div>
       </div>

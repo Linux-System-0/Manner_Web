@@ -271,7 +271,7 @@ pub async fn view_sensitive_info(
     append_log(
         &state.config.log_file,
         &format!(
-            "【敏感信息】用户 {} 查看了员工 {} (id={}) 的完整信息",
+            "[Sensitive info] User {} viewed full info of employee {} (id={})",
             user_tag(&auth.name, &auth.username),
             user_tag(&row.name, &row.username),
             row.id
@@ -330,10 +330,10 @@ pub async fn view_sensitive_field(
 
     let key = &state.config.field_enc_key;
     let (value, label) = match field.as_str() {
-        "email" => (decrypt_field(row.email, key)?, "邮箱"),
-        "phone" => (decrypt_field(row.phone, key)?, "手机号"),
-        "id_number" => (decrypt_field(row.id_number, key)?, "身份证号"),
-        "address" => (decrypt_field(row.address, key)?, "地址"),
+        "email" => (decrypt_field(row.email, key)?, "email"),
+        "phone" => (decrypt_field(row.phone, key)?, "phone"),
+        "id_number" => (decrypt_field(row.id_number, key)?, "ID number"),
+        "address" => (decrypt_field(row.address, key)?, "address"),
         _ => return Err(AppError::BadRequest("不支持的敏感字段".to_string())),
     };
 
@@ -341,7 +341,7 @@ pub async fn view_sensitive_field(
     append_log(
         &state.config.log_file,
         &format!(
-            "【敏感信息】用户 {} 查看了员工 {} (id={}) 的{}",
+            "[Sensitive info] User {} viewed {} of employee {} (id={})",
             user_tag(&auth.name, &auth.username),
             user_tag(&row.name, &row.username),
             row.id,
@@ -446,7 +446,7 @@ pub async fn create_employee(
     append_log(
         &state.config.log_file,
         &format!(
-            "用户 {} 创建员工 {} ({})",
+            "User {} created employee {} ({})",
             user_tag(&auth.name, &auth.username),
             body.name,
             body.username
@@ -627,7 +627,7 @@ pub async fn delete_employee(
     append_log(
         &state.config.log_file,
         &format!(
-            "用户 {} 删除了员工 {}",
+            "User {} deleted employee {}",
             user_tag(&auth.name, &auth.username),
             id
         ),

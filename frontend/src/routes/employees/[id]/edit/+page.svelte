@@ -5,6 +5,7 @@
   import { goto } from '$app/navigation'
   import { authStore } from '$lib/stores/auth'
   import { getApiError } from '$lib/api/client'
+  import { t } from '$lib/i18n'
   import { getEmployee, updateEmployee } from '$lib/api/employees'
   import { getDepartments, updateEmployeeDepartments } from '$lib/api/departments'
   import Card from '$lib/components/Card.svelte'
@@ -22,7 +23,7 @@
 
   function ensureId(): string {
     if (!id) {
-      message.error('缺少员工 ID')
+      message.error(t('employee.form.missingId'))
       goto('/employees')
       throw new Error('missing employee id')
     }
@@ -61,7 +62,7 @@
       try {
         const res = await getEmployee(ensureId())
         if (res.code !== 0) {
-          message.error(res.message || '获取员工信息失败')
+          message.error(res.message || t('employee.form.fetchFailed'))
           goto('/employees')
           return
         }
@@ -80,7 +81,7 @@
         hireDate = emp.hire_date || ''
         departmentIds = emp.department_ids || []
       } catch (err: unknown) {
-        message.error(getApiError(err, '获取员工信息失败'))
+        message.error(getApiError(err, t('employee.form.fetchFailed')))
         goto('/employees')
       } finally {
         loading = false
@@ -99,10 +100,10 @@
 
   function validate(): boolean {
     const next: Record<string, string> = {}
-    if (!username.trim()) next.username = '请输入用户名'
-    else if (username.trim().length < 3) next.username = '用户名至少3个字符'
-    if (!name.trim()) next.name = '请输入姓名'
-    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) next.email = '请输入有效的邮箱地址'
+    if (!username.trim()) next.username = t('employee.form.errUsername')
+    else if (username.trim().length < 3) next.username = t('employee.form.errUsernameLen')
+    if (!name.trim()) next.name = t('employee.form.errName')
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) next.email = t('employee.form.errEmail')
     errors = next
     return Object.keys(next).length === 0
   }
@@ -122,19 +123,19 @@
         hire_date: hireDate || undefined,
       })
       if (res.code !== 0) {
-        message.error(res.message || '更新失败')
+        message.error(res.message || t('employee.form.updateFailed'))
         return
       }
       // 归属部门独立更新（多对多整体替换）
       const deptRes = await updateEmployeeDepartments(ensureId(), departmentIds)
       if (deptRes.code !== 0) {
-        message.error(deptRes.message || '归属部门更新失败')
+        message.error(deptRes.message || t('employee.form.deptUpdateFailed'))
         return
       }
-      message.success('更新成功')
+      message.success(t('common.updatedSuccess'))
       goto('/employees')
     } catch (err: unknown) {
-      message.error(getApiError(err, '更新失败'))
+      message.error(getApiError(err, t('employee.form.updateFailed')))
     } finally {
       submitting = false
     }
@@ -142,103 +143,102 @@
 </script>
 
 {#if !$authStore.permissions.includes('employee:edit')}
-  <Result status="403" title="403" subTitle="抱歉，你无权访问该页面">
+  <Result status="403" title="403" subTitle={t('common.noAccess')}>
     {#snippet extra()}
-      <Button type="primary" tooltip="返回员工列表页" onClick={() => goto('/employees')}>返回列表</Button>
+      <Button type="primary" tooltip={t('common.backList')} onClick={() => goto('/employees')}>{t('common.backList')}</Button>
     {/snippet}
   </Result>
 {:else}
   <div style="height:100%;overflow:auto">
     <Spin spinning={loading}>
-      <Card title="编辑员工" style="max-width:800px">
+      <Card title={t('employee.form.editTitle')} style="max-width:800px">
         <div
           style="margin-bottom:16px;padding:8px 12px;border:1px solid #ffd591;border-radius:6px;background:#fff7e6;color:#d46b08;font-size:13px;line-height:1.6"
         >
-          手机号 / 邮箱 / 身份证号 / 地址已加密存储，此处仅显示掩码（***）。如需修改请重新输入；
-          未改动的字段将保留原值，不会被覆盖。
+          {t('employee.form.sensitiveNote')}
         </div>
         <Form class="ant-form-vertical" onSubmit={(e) => { e.preventDefault(); handleSubmit() }}>
-          <FormItem label="用户名" required={true} error={errors.username}>
+          <FormItem label={t('employee.form.username')} required={true} error={errors.username}>
             <Input
-              placeholder="请输入用户名"
+              placeholder={t('employee.form.placeholderUsername')}
               value={username}
               disabled={true}
               onInput={(v) => { username = v; errors = { ...errors, username: '' } }}
             />
           </FormItem>
 
-          <FormItem label="姓名" required={true} error={errors.name}>
+          <FormItem label={t('employee.form.name')} required={true} error={errors.name}>
             <Input
-              placeholder="请输入姓名"
+              placeholder={t('employee.form.placeholderName')}
               value={name}
               onInput={(v) => { name = v; errors = { ...errors, name: '' } }}
             />
           </FormItem>
 
-          <FormItem label="职位" error={errors.title}>
+          <FormItem label={t('employee.form.titleField')} error={errors.title}>
             <Input
-              placeholder="请输入职位"
+              placeholder={t('employee.form.placeholderTitle')}
               value={title}
               onInput={(v) => (title = v)}
             />
           </FormItem>
 
-          <FormItem label="邮箱" error={errors.email}>
+          <FormItem label={t('employee.form.email')} error={errors.email}>
             <Input
-              placeholder="请输入邮箱"
+              placeholder={t('employee.form.placeholderEmail')}
               value={email}
               onInput={(v) => { email = v; errors = { ...errors, email: '' } }}
             />
           </FormItem>
 
-          <FormItem label="手机号" error={errors.phone}>
+          <FormItem label={t('employee.form.phone')} error={errors.phone}>
             <Input
-              placeholder="请输入手机号"
+              placeholder={t('employee.form.placeholderPhone')}
               value={phone}
               onInput={(v) => (phone = v)}
             />
           </FormItem>
 
-          <FormItem label="身份证号" error={errors.id_number}>
+          <FormItem label={t('employee.form.idNumber')} error={errors.id_number}>
             <Input
-              placeholder="请输入身份证号"
+              placeholder={t('employee.form.placeholderIdNumber')}
               value={idNumber}
               onInput={(v) => (idNumber = v)}
             />
           </FormItem>
 
-          <FormItem label="地址" error={errors.address}>
+          <FormItem label={t('employee.form.address')} error={errors.address}>
             <Input
               type="textarea"
               rows={2}
-              placeholder="请输入地址"
+              placeholder={t('employee.form.placeholderAddress')}
               value={address}
               onInput={(v) => (address = v)}
             />
           </FormItem>
 
-          <FormItem label="入职日期" error={errors.hire_date}>
+          <FormItem label={t('employee.form.hireDate')} error={errors.hire_date}>
             <DatePicker
               value={hireDate}
-              placeholder="请选择日期"
+              placeholder={t('employee.form.placeholderHireDate')}
               onChange={(v) => (hireDate = v)}
             />
           </FormItem>
 
-          <FormItem label="归属部门" error={errors.department_ids}>
+          <FormItem label={t('employee.form.departments')} error={errors.department_ids}>
             <Select
               value={departmentIds as never[]}
               options={deptOptions}
               multiple={true}
-              placeholder="可选择多个部门"
+              placeholder={t('employee.form.departmentsPlaceholder')}
               onChange={(v) => (departmentIds = (Array.isArray(v) ? v : []) as string[])}
             />
           </FormItem>
 
           <FormItem label="">
             <div style="display:flex;gap:12px">
-              <Button type="primary" htmlType="submit" loading={submitting} tooltip="保存对员工信息的修改">保存</Button>
-              <Button tooltip="放弃修改，返回员工列表" onClick={() => goto('/employees')}>取消</Button>
+              <Button type="primary" htmlType="submit" loading={submitting} tooltip={t('employee.form.saveTooltip')}>{t('employee.form.save')}</Button>
+              <Button tooltip={t('employee.form.cancelTooltip')} onClick={() => goto('/employees')}>{t('common.cancel')}</Button>
             </div>
           </FormItem>
         </Form>

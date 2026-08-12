@@ -1,6 +1,7 @@
 <script lang="ts">
   // Tag：标签（antd 视觉；color 为预设色名或任意颜色）
   import { Icon } from '$lib/icons'
+  import { t } from '$lib/i18n'
   import type { Snippet } from 'svelte'
 
   const PRESET: Record<string, [string, string]> = {
@@ -39,7 +40,7 @@
       class="ant-tag-close-icon"
       role="button"
       tabindex={0}
-      aria-label="关闭"
+      aria-label={t('common.closeBtn')}
       onclick={onClose}
       onkeydown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {

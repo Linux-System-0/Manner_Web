@@ -5,6 +5,7 @@
   import { goto } from '$app/navigation'
   import { authStore } from '$lib/stores/auth'
   import { getApiError } from '$lib/api/client'
+  import { t } from '$lib/i18n'
   import { getRoles, createRole, updateRole, deleteRole } from '$lib/api/roles'
   import { getPermissions } from '$lib/api/system'
   import { getDepartments } from '$lib/api/departments'
@@ -26,18 +27,18 @@
   import { Icon } from '$lib/icons'
   import { message } from '$lib/components/message'
 
-  const SCOPE_LABELS: Record<ScopeType, string> = {
-    all: '全部数据',
-    subtree: '本部门及子部门',
-    department: '本部门',
-    self: '仅本人',
-    custom: '指定部门',
-  }
+  const SCOPE_LABELS: Record<ScopeType, string> = $derived({
+    all: t('scope.all'),
+    subtree: t('scope.subtree'),
+    department: t('scope.department'),
+    self: t('scope.self'),
+    custom: t('scope.custom'),
+  })
 
-  const SCOPE_OPTIONS = (Object.keys(SCOPE_LABELS) as ScopeType[]).map((k) => ({
+  const SCOPE_OPTIONS = $derived((Object.keys(SCOPE_LABELS) as ScopeType[]).map((k) => ({
     value: k,
-    label: `${SCOPE_LABELS[k]}${k === 'all' ? '（不受限）' : ''}`,
-  }))
+    label: k === 'all' ? t('scope.allUnlimited') : SCOPE_LABELS[k],
+  })))
 
   let roles = $state<Role[]>([])
   let loading = $state(false)
@@ -63,12 +64,12 @@
     try {
       const res = await getRoles()
       if (res.code !== 0) {
-        message.error(res.message || '获取角色列表失败')
+        message.error(res.message || t('roles.fetchFailed'))
         return
       }
       roles = res.data.items
     } catch (err: unknown) {
-      message.error(getApiError(err, '获取角色列表失败'))
+      message.error(getApiError(err, t('roles.fetchFailed')))
     } finally {
       loading = false
     }
@@ -105,7 +106,7 @@
       .filter((r) => r.id !== modal.id)
       .map((r) => ({
         value: r.id,
-        label: `${r.name}（${SCOPE_LABELS[r.scope_type] || r.scope_type}）`,
+        label: `${r.name} (${SCOPE_LABELS[r.scope_type] || r.scope_type})`,
         disabled: forbidden.has(r.id) || r.is_system === 1,
       }))
   }
@@ -169,11 +170,11 @@
   async function handleSave() {
     const name = modal.name.trim()
     if (!name) {
-      message.error('请输入角色名称')
+      message.error(t('roles.errName'))
       return
     }
     if (modal.scope_type === 'custom' && modal.scope_department_ids.length === 0) {
-      message.error('「指定部门」范围至少选择一个部门')
+      message.error(t('roles.errCustomScope'))
       return
     }
     saving = true
@@ -189,10 +190,10 @@
             modal.scope_type === 'custom' ? modal.scope_department_ids : [],
         })
         if (res.code !== 0) {
-          message.error(res.message || '创建失败')
+          message.error(res.message || t('common.createdFailed'))
           return
         }
-        message.success('创建成功')
+        message.success(t('common.createdSuccess'))
       } else {
         const isSystem = modal.is_system === 1
         const res = await updateRole(modal.id, {
@@ -210,15 +211,15 @@
           description: modal.description.trim() || null,
         })
         if (res.code !== 0) {
-          message.error(res.message || '更新失败')
+          message.error(res.message || t('common.updatedSuccess'))
           return
         }
-        message.success('更新成功')
+        message.success(t('common.updatedSuccess'))
       }
       modal.open = false
       fetchData()
     } catch (err: unknown) {
-      message.error(getApiError(err, '保存失败'))
+      message.error(getApiError(err, t('common.savedFailed')))
     } finally {
       saving = false
     }
@@ -228,68 +229,68 @@
     try {
       const res = await deleteRole(r.id)
       if (res.code !== 0) {
-        message.error(res.message || '删除失败')
+        message.error(res.message || t('common.deletedFailed'))
         return
       }
-      message.success('删除成功')
+      message.success(t('common.deletedSuccess'))
       fetchData()
     } catch (err: unknown) {
-      message.error(getApiError(err, '删除失败'))
+      message.error(getApiError(err, t('common.deletedFailed')))
     }
   }
 
-  const columns: TableColumn<Role>[] = [
-    { title: '角色名称', dataIndex: 'name', key: 'name', width: 150 },
-    { title: '父角色', key: 'parent', width: 120, render: (r) => r.parent_name || '-' },
+  const columns: TableColumn<Role>[] = $derived([
+    { title: t('roles.roleName'), dataIndex: 'name', key: 'name', width: 150 },
+    { title: t('roles.parent'), key: 'parent', width: 120, render: (r) => r.parent_name || '-' },
     {
-      title: '数据范围',
+      title: t('roles.scope'),
       key: 'scope',
       width: 130,
       render: (r) => SCOPE_LABELS[r.scope_type] || r.scope_type,
     },
     {
-      title: '权限数',
+      title: t('roles.permCount'),
       key: 'permCount',
       width: 80,
       align: 'center',
       render: (r) => String(r.permission_codes.length),
     },
     {
-      title: '成员数',
+      title: t('roles.memberCount'),
       key: 'member_count',
       width: 80,
       align: 'center',
       render: (r) => String(r.member_count),
     },
-    { title: '内置', key: 'system', width: 70, align: 'center', snippet: 'system' },
-    { title: '操作', key: 'action', width: 150, snippet: 'action' },
-  ]
+    { title: t('common.builtin'), key: 'system', width: 70, align: 'center', snippet: 'system' },
+    { title: t('common.actions'), key: 'action', width: 150, snippet: 'action' },
+  ])
 </script>
 
 {#if !$authStore.permissions.includes('role:manage')}
-  <Result status="403" title="403" subTitle="抱歉，你无权访问该页面">
+  <Result status="403" title="403" subTitle={t('common.noAccess')}>
     {#snippet extra()}
-      <Button type="primary" tooltip="返回系统首页" onClick={() => goto('/')}>返回首页</Button>
+      <Button type="primary" tooltip={t('common.backHome')} onClick={() => goto('/')}>{t('common.backHome')}</Button>
     {/snippet}
   </Result>
 {:else}
   {#snippet system(row: Role)}
     {#if row.is_system === 1}
-      <Tag color="red">内置</Tag>
+      <Tag color="red">{t('common.builtin')}</Tag>
     {:else}
-      <Tag>自定义</Tag>
+      <Tag>{t('common.custom')}</Tag>
     {/if}
   {/snippet}
 
   {#snippet action(row: Role)}
     <Space size="small" wrap={true}>
-      <Button type="link" size="small" tooltip="编辑该角色（内置角色仅可改描述）" onClick={() => openEdit(row)}>
-        <Icon name="edit" style="font-size:14px" />编辑
+      <Button type="link" size="small" tooltip={t('roles.editTooltip')} onClick={() => openEdit(row)}>
+        <Icon name="edit" style="font-size:14px" />{t('common.edit')}
       </Button>
       {#if row.is_system !== 1}
-        <Popconfirm title="确定要删除该角色吗？持有该角色的员工将失去对应权限。" onConfirm={() => handleDelete(row)}>
-          <Button type="link" size="small" danger={true} tooltip="删除该角色">
-            <Icon name="delete" style="font-size:14px" />删除
+        <Popconfirm title={t('roles.deleteConfirm')} onConfirm={() => handleDelete(row)}>
+          <Button type="link" size="small" danger={true} tooltip={t('roles.deleteTooltip')}>
+            <Icon name="delete" style="font-size:14px" />{t('common.delete')}
           </Button>
         </Popconfirm>
       {/if}
@@ -297,15 +298,14 @@
   {/snippet}
 
   <div class="page-scroll" style="height:100%;overflow:auto">
-    <Card title="角色管理" bodyStyle="padding:16px 24px">
+    <Card title={t('roles.title')} bodyStyle="padding:16px 24px">
       {#snippet extra()}
-        <Button type="primary" tooltip="创建新角色" onClick={openCreate}>
-          <Icon name="plus" style="font-size:14px" />新增角色
+        <Button type="primary" tooltip={t('roles.createTooltip')} onClick={openCreate}>
+          <Icon name="plus" style="font-size:14px" />{t('roles.addNew')}
         </Button>
       {/snippet}
       <div style="margin-bottom:12px;padding:8px 12px;border:1px solid #d1e9ff;border-radius:6px;background:#e6f4ff;color:#0958d9;font-size:13px;line-height:1.6">
-        员工最终权限 = 员工角色 + 部门角色（含父子继承）的并集；数据范围仅作用于员工数据类权限
-        （查看列表/详情/敏感信息），super_admin 内置角色拥有全部权限且不可修改。
+        {t('roles.info')}
       </div>
       <Table
         columns={columns}
@@ -320,30 +320,30 @@
   <!-- 新增/编辑角色弹窗 -->
   <Modal
     open={modal.open}
-    title={modal.mode === 'create' ? '新增角色' : '编辑角色'}
+    title={modal.mode === 'create' ? t('roles.create') : t('roles.edit')}
     onclose={() => (modal.open = false)}
     onOk={handleSave}
     confirmLoading={saving}
-    okText="保存"
+    okText={t('common.save')}
     width={860}
     bodyStyle="padding:16px 24px"
   >
     <Form class="ant-form-vertical">
-      <FormItem label="角色名称" required={true}>
-        <Input value={modal.name} disabled={modal.is_system === 1} onInput={(v) => (modal = { ...modal, name: v })} placeholder="如：部门主管" />
+      <FormItem label={t('roles.roleName')} required={true}>
+        <Input value={modal.name} disabled={modal.is_system === 1} onInput={(v) => (modal = { ...modal, name: v })} placeholder={t('roles.roleNamePlaceholder')} />
       </FormItem>
       <div style="display:grid;grid-template-columns:1fr 1fr;column-gap:16px">
-        <FormItem label="父角色（继承权限）">
+        <FormItem label={t('roles.parentRole')}>
           <Select
             value={modal.parent_id || undefined}
             options={parentOptions()}
             allowClear={true}
             disabled={modal.is_system === 1}
-            placeholder="不选则为顶级角色"
+            placeholder={t('roles.parentPlaceholder')}
             onChange={(v) => (modal = { ...modal, parent_id: String(v || '') })}
           />
         </FormItem>
-        <FormItem label="数据范围">
+        <FormItem label={t('roles.scopeLabel')}>
           <Select
             value={modal.scope_type}
             options={SCOPE_OPTIONS}
@@ -354,20 +354,20 @@
       </div>
 
       {#if modal.scope_type === 'custom'}
-        <FormItem label="指定部门（custom 范围）">
+        <FormItem label={t('roles.customScope')}>
           <Select
             value={modal.scope_department_ids as never[]}
             options={deptOptions}
             multiple={true}
             allowClear={true}
             disabled={modal.is_system === 1}
-            placeholder="请选择可见部门（可多选）"
+            placeholder={t('roles.customPlaceholder')}
             onChange={(v) => (modal = { ...modal, scope_department_ids: (Array.isArray(v) ? v : []) as string[] })}
           />
         </FormItem>
       {/if}
 
-      <FormItem label="权限（勾选授予该角色的权限码）">
+      <FormItem label={t('roles.permissions')}>
         <div
           style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px 16px;border:1px solid var(--ant-color-border-secondary);border-radius:6px;padding:12px;max-height:280px;overflow-y:auto"
         >
@@ -395,13 +395,13 @@
         </div>
       </FormItem>
 
-      <FormItem label="描述">
+      <FormItem label={t('roles.description')}>
         <Input
           type="textarea"
           rows={2}
           value={modal.description}
           onInput={(v) => (modal = { ...modal, description: v })}
-          placeholder="角色用途说明（可选）"
+          placeholder={t('roles.descriptionPlaceholder')}
         />
       </FormItem>
     </Form>

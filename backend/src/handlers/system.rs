@@ -23,6 +23,8 @@ pub struct SettingsBody {
     pub site_icon: Option<String>,
     pub login_max_failures: Option<String>,
     pub login_lock_window_secs: Option<String>,
+    /// 默认语言包：system（跟随系统/浏览器） | en-US | zh-CN
+    pub default_language: Option<String>,
 }
 
 /// 允许内联渲染的图片扩展名白名单（头像、聊天图片预览）。
@@ -168,7 +170,7 @@ async fn save_upload(
     let max_bytes = limit.as_deref().and_then(parse_size_limit);
 
     if max_bytes == Some(0) {
-        append_log(&state.config.log_file, &format!("用户 {} 上传文件失败: 上传已被管理员禁止", user_tag(&auth.name, &auth.username)), ip);
+        append_log(&state.config.log_file, &format!("User {} upload failed: uploads disabled by administrator", user_tag(&auth.name, &auth.username)), ip);
         return Err(AppError::BadRequest("文件上传已被管理员禁止".to_string()));
     }
 
@@ -196,7 +198,7 @@ async fn save_upload(
             is_uploadable_extension(&ext)
         };
         if !ext_ok {
-            append_log(&state.config.log_file, &format!("用户 {} 上传文件 {} 失败: 文件类型不受支持 ({})", user_tag(&auth.name, &auth.username), file_name, ext), ip);
+            append_log(&state.config.log_file, &format!("User {} upload of {} failed: unsupported file type ({})", user_tag(&auth.name, &auth.username), file_name, ext), ip);
             return Err(AppError::BadRequest(format!(
                 "不支持的文件类型: {}", ext
             )));
@@ -222,7 +224,7 @@ async fn save_upload(
         // 图片类一律校验魔数（防伪装扩展名，例如把 HTML 改名 .png）；
         // 非图片类型不校验（其安全由静态目录守卫强制下载兜底）。
         if is_allowed_extension(&ext) && !has_valid_magic(&data, &ext) {
-            append_log(&state.config.log_file, &format!("用户 {} 上传文件 {} 失败: 文件内容与声明类型不符", user_tag(&auth.name, &auth.username), file_name), ip);
+            append_log(&state.config.log_file, &format!("User {} upload of {} failed: file content does not match declared type", user_tag(&auth.name, &auth.username), file_name), ip);
             return Err(AppError::BadRequest(
                 "文件内容与声明类型不符".to_string(),
             ));
@@ -231,7 +233,7 @@ async fn save_upload(
         if let Some(max) = max_bytes {
             if data.len() > max {
                 let limit_display = limit.clone().unwrap_or_else(|| max.to_string());
-                append_log(&state.config.log_file, &format!("用户 {} 上传文件 {} 失败: 文件大小超过限制 ({})", user_tag(&auth.name, &auth.username), file_name, limit_display), ip);
+                append_log(&state.config.log_file, &format!("User {} upload of {} failed: file size exceeds limit ({})", user_tag(&auth.name, &auth.username), file_name, limit_display), ip);
                 return Err(AppError::BadRequest(format!(
                     "文件大小超过限制 ({})", limit_display
                 )));
@@ -239,11 +241,11 @@ async fn save_upload(
         }
 
         tokio::fs::write(&path, &data).await.map_err(|e| {
-            append_log(&state.config.log_file, &format!("用户 {} 上传文件 {} 失败: 写入失败 - {}", user_tag(&auth.name, &auth.username), file_name, e), ip);
+            append_log(&state.config.log_file, &format!("User {} upload of {} failed: write error - {}", user_tag(&auth.name, &auth.username), file_name, e), ip);
             AppError::Internal(anyhow::anyhow!("Failed to write upload file: {}", e))
         })?;
 
-        append_log(&state.config.log_file, &format!("用户 {} 上传文件成功: {} ({} bytes, {})", user_tag(&auth.name, &auth.username), file_name, data.len(), new_name), ip);
+        append_log(&state.config.log_file, &format!("User {} uploaded file successfully: {} ({} bytes, {})", user_tag(&auth.name, &auth.username), file_name, data.len(), new_name), ip);
         let url = if image_only {
             format!("/uploads/{}", new_name)
         } else {
@@ -311,12 +313,12 @@ pub async fn update_settings(
         }
     }
 
-    save_setting(&state.pool, &current, "chat_upload_limit", body.chat_upload_limit.clone(), &mut changes, "上传限制").await?;
-    save_setting(&state.pool, &current, "login_theme", body.login_theme.clone(), &mut changes, "登录主题").await?;
-    save_setting(&state.pool, &current, "site_title", body.site_title.clone(), &mut changes, "登录后网站标题").await?;
-    save_setting(&state.pool, &current, "login_site_title", body.login_site_title.clone(), &mut changes, "登录页网站标题").await?;
-    save_setting(&state.pool, &current, "login_site_icon", body.login_site_icon.clone(), &mut changes, "登录页网站图标").await?;
-    save_setting(&state.pool, &current, "site_icon", body.site_icon.clone(), &mut changes, "登录后网站图标").await?;
+    save_setting(&state.pool, &current, "chat_upload_limit", body.chat_upload_limit.clone(), &mut changes, "upload limit").await?;
+    save_setting(&state.pool, &current, "login_theme", body.login_theme.clone(), &mut changes, "login theme").await?;
+    save_setting(&state.pool, &current, "site_title", body.site_title.clone(), &mut changes, "post-login site title").await?;
+    save_setting(&state.pool, &current, "login_site_title", body.login_site_title.clone(), &mut changes, "login page site title").await?;
+    save_setting(&state.pool, &current, "login_site_icon", body.login_site_icon.clone(), &mut changes, "login page site icon").await?;
+    save_setting(&state.pool, &current, "site_icon", body.site_icon.clone(), &mut changes, "post-login site icon").await?;
 
     // 登录限流参数:数值校验(1~100 次 / 1~86400 秒),合法才入库。
     if let Some(ref v) = body.login_max_failures {
@@ -339,8 +341,24 @@ pub async fn update_settings(
             ));
         }
     }
-    save_setting(&state.pool, &current, "login_max_failures", body.login_max_failures.clone(), &mut changes, "登录失败次数上限").await?;
-    save_setting(&state.pool, &current, "login_lock_window_secs", body.login_lock_window_secs.clone(), &mut changes, "登录锁定窗口(秒)").await?;
+    save_setting(&state.pool, &current, "login_max_failures", body.login_max_failures.clone(), &mut changes, "max login failures").await?;
+    save_setting(&state.pool, &current, "login_lock_window_secs", body.login_lock_window_secs.clone(), &mut changes, "login lock window (secs)").await?;
+
+    // 默认语言包：system（跟随系统）或合法 BCP-47 语言代码（如 en-US / zh-CN / ja-JP），
+    // 仅校验格式防止任意字符串入库；前端语言包目录（locales/*.json）决定可用列表，
+    // 后端不做语言白名单限制（添加语言包无需改后端）。
+    if let Some(ref v) = body.default_language {
+        let valid = v == "system"
+            || (v.len() >= 2
+                && v.len() <= 35
+                && v.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+        if !valid {
+            return Err(AppError::ValidationError(
+                "默认语言包仅支持 system 或合法语言代码（如 en-US / zh-CN）".to_string(),
+            ));
+        }
+    }
+    save_setting(&state.pool, &current, "default_language", body.default_language.clone(), &mut changes, "default language").await?;
 
     // 限流参数变更后立即同步到内存节流器(无需重启生效)。
     if body.login_max_failures.is_some() || body.login_lock_window_secs.is_some() {
@@ -362,7 +380,7 @@ pub async fn update_settings(
     }
 
     if !changes.is_empty() {
-        append_log(&state.config.log_file, &format!("用户 {} 修改了系统设置: {}", user_tag(&auth.name, &auth.username), changes.join(", ")), &ip);
+        append_log(&state.config.log_file, &format!("User {} modified system settings: {}", user_tag(&auth.name, &auth.username), changes.join(", ")), &ip);
     }
     Ok(Json(ApiResponse::ok_msg("保存成功")))
 }
@@ -395,7 +413,7 @@ pub async fn get_login_page_settings(
     let rows: Vec<(String, String)> = sqlx::query_as(
         "SELECT setting_key, setting_value FROM system_settings \
          WHERE setting_key IN ('login_site_title','login_theme','site_title',\
-         'login_site_icon','site_icon')",
+         'login_site_icon','site_icon','default_language')",
     )
     .fetch_all(&state.pool)
     .await

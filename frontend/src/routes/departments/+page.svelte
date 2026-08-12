@@ -6,6 +6,7 @@
   import { goto } from '$app/navigation'
   import { authStore } from '$lib/stores/auth'
   import { getApiError } from '$lib/api/client'
+  import { t } from '$lib/i18n'
   import {
     getDepartments,
     createDepartment,
@@ -79,14 +80,14 @@
     try {
       const res = await updateDepartmentRoles(roleModal.deptId, selectedDeptRoleIds)
       if (res.code !== 0) {
-        message.error(res.message || '保存角色失败')
+        message.error(res.message || t('departments.saveRolesFailed'))
         return
       }
-      message.success('角色绑定已更新')
+      message.success(t('departments.rolesUpdated'))
       roleModal.open = false
       fetchDepartments()
     } catch (err: unknown) {
-      message.error(getApiError(err, '保存角色失败'))
+      message.error(getApiError(err, t('departments.saveRolesFailed')))
     } finally {
       savingDeptRoles = false
     }
@@ -100,7 +101,7 @@
     for (const d of list) {
       const node: TreeNode = {
         key: d.id,
-        title: `${d.name}${d.member_count > 0 ? ` (${d.member_count})` : ''}${d.leader_names ? ` · 负责人:${d.leader_names}` : ''}${d.role_names ? ` · 角色:${d.role_names}` : ''}`,
+        title: `${d.name}${d.member_count > 0 ? ` (${d.member_count})` : ''}${d.leader_names ? ` · ${t('departments.leader')}:${d.leader_names}` : ''}${d.role_names ? ` · ${t('departments.roles')}:${d.role_names}` : ''}`,
       }
       if (d.parent_id && map.has(d.parent_id)) {
         const arr = childrenOf.get(d.parent_id) || []
@@ -125,12 +126,12 @@
     try {
       const res = await getDepartments()
       if (res.code !== 0) {
-        message.error(res.message || '获取部门列表失败')
+        message.error(res.message || t('departments.fetchFailed'))
         return
       }
       depts = res.data.items
     } catch (err: unknown) {
-      message.error(getApiError(err, '获取部门列表失败'))
+      message.error(getApiError(err, t('departments.fetchFailed')))
     } finally {
       loading = false
     }
@@ -216,7 +217,7 @@
   async function handleSave() {
     const name = formModal.name.trim()
     if (!name) {
-      message.error('请输入部门名称')
+      message.error(t('departments.errName'))
       return
     }
     saving = true
@@ -229,10 +230,10 @@
           sort_order: Number(formModal.sort_order) || 0,
         })
         if (res.code !== 0) {
-          message.error(res.message || '创建失败')
+          message.error(res.message || t('common.createdFailed'))
           return
         }
-        message.success('创建成功')
+        message.success(t('common.createdSuccess'))
       } else {
         const res = await updateDepartment(formModal.id, {
           name,
@@ -241,15 +242,15 @@
           sort_order: Number(formModal.sort_order) || 0,
         })
         if (res.code !== 0) {
-          message.error(res.message || '更新失败')
+          message.error(res.message || t('common.updatedSuccess'))
           return
         }
-        message.success('更新成功')
+        message.success(t('common.updatedSuccess'))
       }
       formModal.open = false
       fetchDepartments()
     } catch (err: unknown) {
-      message.error(getApiError(err, '保存失败'))
+      message.error(getApiError(err, t('common.savedFailed')))
     } finally {
       saving = false
     }
@@ -257,23 +258,23 @@
 
   async function handleDelete(d: Department) {
     const ok = await modal.confirm({
-      title: '删除部门',
-      content: `确定要删除「${d.name}」吗？删除后该部门的成员归属将一并解除（存在子部门时需先删除子部门）。`,
-      okText: '删除',
+      title: t('departments.deleteTitle'),
+      content: t('departments.deleteContent', { name: d.name }),
+      okText: t('common.delete'),
       okDanger: true,
     })
     if (!ok) return
     try {
       const res = await deleteDepartment(d.id)
       if (res.code !== 0) {
-        message.error(res.message || '删除失败')
+        message.error(res.message || t('common.deletedFailed'))
         return
       }
-      message.success('删除成功')
+      message.success(t('common.deletedSuccess'))
       if (selectedKey === d.id) selectedKey = ''
       fetchDepartments()
     } catch (err: unknown) {
-      message.error(getApiError(err, '删除失败'))
+      message.error(getApiError(err, t('common.deletedFailed')))
     }
   }
 
@@ -297,30 +298,30 @@
     try {
       const res = await getDepartmentMembers(deptId)
       if (res.code !== 0) {
-        message.error(res.message || '获取成员失败')
+        message.error(res.message || t('departments.fetchMembersFailed'))
         return
       }
       members = res.data.items
     } catch (err: unknown) {
-      message.error(getApiError(err, '获取成员失败'))
+      message.error(getApiError(err, t('departments.fetchMembersFailed')))
     } finally {
       loadingMembers = false
     }
   }
 
-  const memberColumns: TableColumn<DepartmentMember>[] = [
-    { title: '姓名', dataIndex: 'name', key: 'name', width: 120 },
-    { title: '用户名', dataIndex: 'username', key: 'username', width: 120 },
+  const memberColumns: TableColumn<DepartmentMember>[] = $derived([
+    { title: t('departments.name'), dataIndex: 'name', key: 'name', width: 120 },
+    { title: t('departments.username'), dataIndex: 'username', key: 'username', width: 120 },
     {
-      title: '职位',
+      title: t('departments.titleField'),
       key: 'title',
       width: 120,
       render: (r) => r.title || '-',
     },
-    { title: '状态', key: 'status', width: 80, align: 'center', snippet: 'status' },
-    { title: '身份', key: 'leader', width: 100, align: 'center', snippet: 'leader' },
-    { title: '操作', key: 'action', width: 160, snippet: 'action' },
-  ]
+    { title: t('departments.status'), key: 'status', width: 80, align: 'center', snippet: 'status' },
+    { title: t('departments.identity'), key: 'leader', width: 100, align: 'center', snippet: 'leader' },
+    { title: t('departments.actions'), key: 'action', width: 160, snippet: 'action' },
+  ])
 
   /** 切换某成员的负责人身份 */
   async function toggleLeader(m: DepartmentMember) {
@@ -333,15 +334,15 @@
         : [...memberModal.leaderIds, m.id]
       const res = await updateDepartment(deptId, { leader_ids: next })
       if (res.code !== 0) {
-        message.error(res.message || '更新负责人失败')
+        message.error(res.message || t('departments.updateLeaderFailed'))
         return
       }
       memberModal = { ...memberModal, leaderIds: next }
-      message.success(isLeader ? '已取消负责人' : '已设为负责人')
+      message.success(isLeader ? t('departments.unsetLeaderSuccess') : t('departments.setLeaderSuccess'))
       await fetchMembers(deptId)
       fetchDepartments()
     } catch (err: unknown) {
-      message.error(getApiError(err, '更新负责人失败'))
+      message.error(getApiError(err, t('departments.updateLeaderFailed')))
     } finally {
       togglingLeader = ''
     }
@@ -356,7 +357,7 @@
   async function handleAddMembers() {
     const deptId = memberModal.deptId
     if (selectedMemberIds.length === 0) {
-      message.warning('请先选择员工')
+      message.warning(t('departments.warnSelectEmployee'))
       return
     }
     savingMembers = true
@@ -366,17 +367,17 @@
         if (!current.includes(deptId)) {
           const res = await updateEmployeeDepartments(empId, [...current, deptId])
           if (res.code !== 0) {
-            message.error(res.message || `添加员工失败：${empId}`)
+            message.error(res.message || `${t('departments.addEmployeeFailed')}: ${empId}`)
             return
           }
         }
       }
-      message.success('添加成功')
+      message.success(t('common.addedSuccess'))
       selectedMemberIds = []
       await fetchMembers(deptId)
       fetchDepartments()
     } catch (err: unknown) {
-      message.error(getApiError(err, '添加员工失败'))
+      message.error(getApiError(err, t('departments.addEmployeeFailed')))
     } finally {
       savingMembers = false
     }
@@ -386,9 +387,9 @@
   async function removeMember(m: DepartmentMember) {
     const deptId = memberModal.deptId
     const ok = await modal.confirm({
-      title: '移出部门',
-      content: `确定将 ${m.name} 移出「${memberModal.deptName}」吗？`,
-      okText: '移出',
+      title: t('departments.removeFromDept'),
+      content: t('departments.removeContent', { name: m.name, deptName: memberModal.deptName }),
+      okText: t('common.remove'),
       okDanger: true,
     })
     if (!ok) return
@@ -397,34 +398,34 @@
       const next = current.filter((id) => id !== deptId)
       const res = await updateEmployeeDepartments(m.id, next)
       if (res.code !== 0) {
-        message.error(res.message || '移出失败')
+        message.error(res.message || t('departments.removeFailed'))
         return
       }
-      message.success('已移出')
+      message.success(t('departments.removedSuccess'))
       await fetchMembers(deptId)
       fetchDepartments()
     } catch (err: unknown) {
-      message.error(getApiError(err, '移出失败'))
+      message.error(getApiError(err, t('departments.removeFailed')))
     }
   }
 </script>
 
 {#if !$authStore.permissions.includes('department:list')}
-  <Result status="403" title="403" subTitle="抱歉，你无权访问该页面">
+  <Result status="403" title="403" subTitle={t('common.noAccess')}>
     {#snippet extra()}
-      <Button type="primary" tooltip="返回系统首页" onClick={() => goto('/')}>返回首页</Button>
+      <Button type="primary" tooltip={t('common.backHome')} onClick={() => goto('/')}>{t('common.backHome')}</Button>
     {/snippet}
   </Result>
 {:else}
   {#snippet status(row: DepartmentMember)}
-    <Tag color={row.status === 1 ? 'success' : 'default'}>{row.status === 1 ? '在职' : '禁用'}</Tag>
+    <Tag color={row.status === 1 ? 'success' : 'default'}>{row.status === 1 ? t('common.onJob') : t('common.offJob')}</Tag>
   {/snippet}
 
   {#snippet leader(row: DepartmentMember)}
     {#if row.is_leader === 1}
-      <Tag color="orange">负责人</Tag>
+      <Tag color="orange">{t('common.leader')}</Tag>
     {:else}
-      <Tag>成员</Tag>
+      <Tag>{t('common.member')}</Tag>
     {/if}
   {/snippet}
 
@@ -434,18 +435,18 @@
         <Button
           type="link"
           size="small"
-          tooltip={row.is_leader === 1 ? '取消该成员的负责人身份' : '将该成员设为部门负责人'}
+          tooltip={row.is_leader === 1 ? t('departments.unsetLeader') : t('departments.setLeader')}
           loading={togglingLeader === row.id}
           onClick={() => toggleLeader(row)}
         >
           {#if row.is_leader === 1}
-            取消负责人
+            {t('departments.unsetLeader')}
           {:else}
-            设为负责人
+            {t('departments.setLeader')}
           {/if}
         </Button>
-        <Button type="link" size="small" danger={true} tooltip="将该成员移出本部门" onClick={() => removeMember(row)}>
-          移出部门
+        <Button type="link" size="small" danger={true} tooltip={t('departments.removeMemberTooltip')} onClick={() => removeMember(row)}>
+          {t('departments.removeFromDept')}
         </Button>
       </Space>
     {/if}
@@ -453,20 +454,20 @@
 
   <div class="page-scroll" style="height:100%;overflow:auto">
     <Card
-      title="部门管理"
+      title={t('departments.title')}
       bodyStyle="padding:16px 24px"
     >
       {#snippet extra()}
         {#if canCreate}
-          <Button type="primary" tooltip="创建一个顶级部门" onClick={() => openCreate(null)}>
-            <Icon name="plus" style="font-size:14px" />新增根部门
+          <Button type="primary" tooltip={t('departments.createRootTooltip')} onClick={() => openCreate(null)}>
+            <Icon name="plus" style="font-size:14px" />{t('departments.addRoot')}
           </Button>
         {/if}
       {/snippet}
       {#if loading}
-        <span>加载中...</span>
+        <span>{t('common.loading')}</span>
       {:else if depts.length === 0}
-        <Empty description="暂无部门，点击右上角「新增根部门」创建" />
+        <Empty description={t('departments.empty')} />
       {:else}
         <Tree
           treeData={treeData}
@@ -477,40 +478,40 @@
           {#snippet action(node: TreeNode)}
             <Space size="small" wrap={true}>
               {#if canViewMembers}
-                <Button type="link" size="small" tooltip="查看该部门的成员列表" onClick={() => {
+                <Button type="link" size="small" tooltip={t('departments.membersTooltip')} onClick={() => {
                   const d = depts.find((x) => x.id === node.key)
                   if (d) openMembers(d)
                 }}>
-                  <Icon name="team" style="font-size:14px" />成员
+                  <Icon name="team" style="font-size:14px" />{t('departments.members')}
                 </Button>
               {/if}
               {#if canManageRoles}
-                <Button type="link" size="small" tooltip="绑定该部门自动继承的角色" onClick={() => {
+                <Button type="link" size="small" tooltip={t('departments.rolesTooltip')} onClick={() => {
                   const d = depts.find((x) => x.id === node.key)
                   if (d) openDeptRoles(d)
                 }}>
-                  <Icon name="lock" style="font-size:14px" />角色
+                  <Icon name="lock" style="font-size:14px" />{t('departments.roles')}
                 </Button>
               {/if}
               {#if canCreate}
-                <Button type="link" size="small" tooltip="在该部门下创建子部门" onClick={() => openCreate(node.key)}>
-                  <Icon name="plus" style="font-size:14px" />子部门
+                <Button type="link" size="small" tooltip={t('departments.subTooltip')} onClick={() => openCreate(node.key)}>
+                  <Icon name="plus" style="font-size:14px" />{t('departments.sub')}
                 </Button>
               {/if}
               {#if canEdit}
-                <Button type="link" size="small" tooltip="编辑该部门的名称与负责人" onClick={() => {
+                <Button type="link" size="small" tooltip={t('departments.editTooltip')} onClick={() => {
                   const d = depts.find((x) => x.id === node.key)
                   if (d) openEdit(d)
                 }}>
-                  <Icon name="edit" style="font-size:14px" />编辑
+                  <Icon name="edit" style="font-size:14px" />{t('common.edit')}
                 </Button>
               {/if}
               {#if canDelete}
-                <Button type="link" size="small" danger={true} tooltip="删除该部门及其子部门" onClick={() => {
+                <Button type="link" size="small" danger={true} tooltip={t('departments.deleteTooltip')} onClick={() => {
                   const d = depts.find((x) => x.id === node.key)
                   if (d) handleDelete(d)
                 }}>
-                  <Icon name="delete" style="font-size:14px" />删除
+                  <Icon name="delete" style="font-size:14px" />{t('common.delete')}
                 </Button>
               {/if}
             </Space>
@@ -523,47 +524,47 @@
   <!-- 部门新增/编辑弹窗 -->
   <Modal
     open={formModal.open}
-    title={formModal.mode === 'create' ? '新增部门' : '编辑部门'}
+    title={formModal.mode === 'create' ? t('departments.create') : t('departments.edit')}
     onclose={() => (formModal.open = false)}
     onOk={handleSave}
     confirmLoading={saving}
-    okText="保存"
+    okText={t('common.save')}
   >
     <Form>
-      <FormItem label="部门名称" required={true}>
+      <FormItem label={t('departments.deptName')} required={true}>
         <Input
           value={formModal.name}
           onInput={(v) => (formModal = { ...formModal, name: v })}
-          placeholder="请输入部门名称"
+          placeholder={t('departments.deptNamePlaceholder')}
         />
       </FormItem>
 
-      <FormItem label="上级部门">
+      <FormItem label={t('departments.parentDept')}>
         <Select
           value={formModal.parent_id || undefined}
           options={parentOptions()}
           allowClear={true}
-          placeholder="不选则为根部门"
+          placeholder={t('departments.parentPlaceholder')}
           onChange={(v) => (formModal = { ...formModal, parent_id: String(v || '') })}
         />
       </FormItem>
 
-      <FormItem label="部门负责人" extra="可多选">
+      <FormItem label={t('departments.leader')} extra={t('departments.leaderExtra')}>
         <Select
           value={formModal.leader_ids as never[]}
           options={employeeOptions}
           multiple={true}
           allowClear={true}
-          placeholder="请选择负责人（可多选）"
+          placeholder={t('departments.leaderPlaceholder')}
           onChange={(v) => (formModal = { ...formModal, leader_ids: (Array.isArray(v) ? v : []) as string[] })}
         />
       </FormItem>
 
-      <FormItem label="排序">
+      <FormItem label={t('departments.sort')}>
         <Input
           value={formModal.sort_order}
           onInput={(v) => (formModal = { ...formModal, sort_order: v })}
-          placeholder="数字越小越靠前"
+          placeholder={t('departments.sortPlaceholder')}
         />
       </FormItem>
     </Form>
@@ -572,18 +573,18 @@
   <!-- 成员管理弹窗 -->
   <Modal
     open={memberModal.open}
-    title={`部门成员 - ${memberModal.deptName}`}
+    title={t('departments.memberTitle', { name: memberModal.deptName })}
     onclose={() => (memberModal.open = false)}
     width={760}
     bodyStyle="padding:16px 24px"
   >    {#snippet footer()}
-      <Button tooltip="关闭弹窗" onClick={() => (memberModal.open = false)}>关闭</Button>
+      <Button tooltip={t('common.closeDialog')} onClick={() => (memberModal.open = false)}>{t('common.closeBtn')}</Button>
     {/snippet}
 
     {#if canManageEmployeeDept}
       <div style="margin-bottom:16px">
         <span style="color:var(--ant-color-text-secondary);display:block;margin-bottom:8px">
-          添加员工到该部门（可多选，保留员工原有归属）
+          {t('departments.addEmployeeHint')}
         </span>
         <Space>
           <Select
@@ -594,10 +595,10 @@
                 !members.some((m) => m.id === e.value),
             )}
             multiple={true}
-            placeholder="选择员工"
+            placeholder={t('departments.selectEmployee')}
             onChange={(v) => (selectedMemberIds = (Array.isArray(v) ? v : []) as string[])}
           />
-          <Button type="primary" loading={savingMembers} tooltip="将所选员工添加到该部门" onClick={handleAddMembers}>添加</Button>
+          <Button type="primary" loading={savingMembers} tooltip={t('departments.addTooltip')} onClick={handleAddMembers}>{t('departments.add')}</Button>
         </Space>
       </div>
     {/if}
@@ -614,20 +615,20 @@
   <!-- 部门角色绑定弹窗 -->
   <Modal
     open={roleModal.open}
-    title={`部门角色绑定 - ${roleModal.deptName}`}
+    title={t('departments.roleBindTitle', { name: roleModal.deptName })}
     onclose={() => (roleModal.open = false)}
     width={560}
     bodyStyle="padding:16px 24px"
   >
     {#snippet footer()}
-      <Button tooltip="关闭弹窗，不保存修改" onClick={() => (roleModal.open = false)}>取消</Button>
-      <Button type="primary" tooltip="保存部门角色绑定" loading={savingDeptRoles} onClick={handleSaveDeptRoles}>保存</Button>
+      <Button tooltip={t('common.closeDialogNoSave')} onClick={() => (roleModal.open = false)}>{t('common.cancel')}</Button>
+      <Button type="primary" tooltip={t('departments.saveRolesFailed')} loading={savingDeptRoles} onClick={handleSaveDeptRoles}>{t('common.save')}</Button>
     {/snippet}
     <span style="color:var(--ant-color-text-secondary);display:block;margin-bottom:12px">
-      绑定后，该部门所有员工自动获得所选角色的权限（super_admin 不允许经部门绑定）。
+      {t('departments.roleBindHint')}
     </span>
     {#if roleList.length === 0}
-      <span style="color:var(--ant-color-warning)">暂无可绑定的角色，请先在「角色管理」中创建</span>
+      <span style="color:var(--ant-color-warning)">{t('departments.noBindableRoles')}</span>
     {:else}
       <div style="display:flex;flex-direction:column;gap:8px;max-height:320px;overflow-y:auto">
         {#each roleList as role}
@@ -645,9 +646,9 @@
             />
             <span style="flex:1;font-weight:500">
               {role.name}
-              {#if role.is_system === 1}<span style="color:var(--ant-color-error);font-size:12px">内置（不可绑定）</span>{/if}
+              {#if role.is_system === 1}<span style="color:var(--ant-color-error);font-size:12px">{t('departments.builtinNotBindable')}</span>{/if}
             </span>
-            <span style="color:var(--ant-color-text-secondary);font-size:12px">{role.permission_codes.length} 项权限</span>
+            <span style="color:var(--ant-color-text-secondary);font-size:12px">{t('common.permissionCount', { count: role.permission_codes.length })}</span>
           </label>
         {/each}
       </div>

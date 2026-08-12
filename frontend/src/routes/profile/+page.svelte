@@ -2,6 +2,7 @@
   // 个人资料（复刻 React 版 frontend/src/pages/profile/Index.tsx）
   import { authStore } from '$lib/stores/auth'
   import { getApiError } from '$lib/api/client'
+  import { t } from '$lib/i18n'
   import { changePassword } from '$lib/api/auth'
   import { uploadImage } from '$lib/api/system'
   import { updateEmployee } from '$lib/api/employees'
@@ -38,13 +39,13 @@
       // 头像仅允许更新自己（后端校验 only_avatar 分支）
       const res = await updateEmployee(me.id, { avatar: avatarUrl } as UpdateEmployeeRequest)
       if (res.code !== 0) {
-        message.error(res.message || '头像上传失败')
+        message.error(res.message || t('profile.avatarFailed'))
         return
       }
       authStore.setUser({ ...me, avatar: avatarUrl })
-      message.success('头像更新成功')
+      message.success(t('profile.avatarUpdated'))
     } catch (err: unknown) {
-      message.error(getApiError(err, '头像上传失败'))
+      message.error(getApiError(err, t('profile.avatarFailed')))
     } finally {
       uploading = false
     }
@@ -52,12 +53,12 @@
 
   function validate(): boolean {
     const next: Record<string, string> = {}
-    if (!oldPassword) next.oldPassword = '请输入当前密码'
-    else if (oldPassword.length < 8) next.oldPassword = '密码至少 8 位'
-    if (!newPassword) next.newPassword = '请输入新密码'
-    else if (newPassword.length < 8) next.newPassword = '密码至少 8 位'
-    if (!confirmPassword) next.confirmPassword = '请再次输入新密码'
-    else if (confirmPassword !== newPassword) next.confirmPassword = '两次输入的密码不一致'
+    if (!oldPassword) next.oldPassword = t('profile.errCurrentPassword')
+    else if (oldPassword.length < 8) next.oldPassword = t('profile.errPasswordLen')
+    if (!newPassword) next.newPassword = t('profile.errNewPassword')
+    else if (newPassword.length < 8) next.newPassword = t('profile.errPasswordLen')
+    if (!confirmPassword) next.confirmPassword = t('profile.errConfirmPassword')
+    else if (confirmPassword !== newPassword) next.confirmPassword = t('profile.errPasswordMismatch')
     errors = next
     return Object.keys(next).length === 0
   }
@@ -68,17 +69,17 @@
     try {
       const res = await changePassword(oldPassword, newPassword)
       if (res.code !== 0) {
-        message.error(res.message || '密码修改失败')
+        message.error(res.message || t('profile.changeFailed'))
         return
       }
       // F-08: 改密后 pwd_version 递增，当前会话随之下一次请求失效，提示重新登录
-      message.success('密码修改成功，请重新登录')
+      message.success(t('profile.changedSuccess'))
       oldPassword = ''
       newPassword = ''
       confirmPassword = ''
       errors = {}
     } catch (err: unknown) {
-      message.error(getApiError(err, '密码修改失败'))
+      message.error(getApiError(err, t('profile.changeFailed')))
     } finally {
       submitting = false
     }
@@ -86,11 +87,11 @@
 </script>
 
 <div style="height:100%;overflow:auto">
-  <Title level={4} style="margin-bottom:24px">个人资料</Title>
+  <Title level={4} style="margin-bottom:24px">{t('profile.title')}</Title>
 
   <Row gutter={[24, 24]}>
     <Col span={12}>
-      <Card title="基本信息">
+      <Card title={t('profile.basicInfo')}>
         <div style="text-align:center;margin-bottom:24px">
           <Avatar size={100} src={$authStore.user?.avatar}>
             {#if !$authStore.user?.avatar}
@@ -105,8 +106,8 @@
                 return false
               }}
             >
-              <Button loading={uploading} tooltip="上传新头像图片">
-                <Icon name="upload" style="font-size:14px" />更换头像
+              <Button loading={uploading} tooltip={t('profile.avatarTooltip')}>
+                <Icon name="upload" style="font-size:14px" />{t('profile.changeAvatar')}
               </Button>
             </Upload>
           </div>
@@ -116,7 +117,7 @@
           <tbody>
             <tr>
               <th style="padding:16px 24px;font-weight:500;color:var(--ant-color-text-secondary);background:var(--ant-color-fill-quaternary);border:1px solid var(--ant-color-border-secondary);text-align:right;white-space:nowrap;vertical-align:top;width:110px">
-                用户名
+                {t('profile.username')}
               </th>
               <td style="padding:16px 24px;color:var(--ant-color-text);border:1px solid var(--ant-color-border-secondary);vertical-align:top">
                 {$authStore.user?.username || '-'}
@@ -124,7 +125,7 @@
             </tr>
             <tr>
               <th style="padding:16px 24px;font-weight:500;color:var(--ant-color-text-secondary);background:var(--ant-color-fill-quaternary);border:1px solid var(--ant-color-border-secondary);text-align:right;white-space:nowrap;vertical-align:top;width:110px">
-                姓名
+                {t('profile.name')}
               </th>
               <td style="padding:16px 24px;color:var(--ant-color-text);border:1px solid var(--ant-color-border-secondary);vertical-align:top">
                 {$authStore.user?.name || '-'}
@@ -132,7 +133,7 @@
             </tr>
             <tr>
               <th style="padding:16px 24px;font-weight:500;color:var(--ant-color-text-secondary);background:var(--ant-color-fill-quaternary);border:1px solid var(--ant-color-border-secondary);text-align:right;white-space:nowrap;vertical-align:top;width:110px">
-                邮箱
+                {t('profile.email')}
               </th>
               <td style="padding:16px 24px;color:var(--ant-color-text);border:1px solid var(--ant-color-border-secondary);vertical-align:top">
                 {$authStore.user?.email || '-'}
@@ -140,7 +141,7 @@
             </tr>
             <tr>
               <th style="padding:16px 24px;font-weight:500;color:var(--ant-color-text-secondary);background:var(--ant-color-fill-quaternary);border:1px solid var(--ant-color-border-secondary);text-align:right;white-space:nowrap;vertical-align:top;width:110px">
-                职位
+                {t('profile.titleField')}
               </th>
               <td style="padding:16px 24px;color:var(--ant-color-text);border:1px solid var(--ant-color-border-secondary);vertical-align:top">
                 {$authStore.user?.title || '-'}
@@ -148,7 +149,7 @@
             </tr>
             <tr>
               <th style="padding:16px 24px;font-weight:500;color:var(--ant-color-text-secondary);background:var(--ant-color-fill-quaternary);border:1px solid var(--ant-color-border-secondary);text-align:right;white-space:nowrap;vertical-align:top;width:110px">
-                手机号
+                {t('profile.phone')}
               </th>
               <td style="padding:16px 24px;color:var(--ant-color-text);border:1px solid var(--ant-color-border-secondary);vertical-align:top">
                 {$authStore.user?.phone || '-'}
@@ -160,40 +161,40 @@
     </Col>
 
     <Col span={12}>
-      <Card title="修改密码">
+      <Card title={t('profile.changePassword')}>
         <Form class="ant-form-vertical" onSubmit={(e) => { e.preventDefault(); handleChangePassword() }}>
-          <FormItem label="当前密码" required={true} error={errors.oldPassword}>
+          <FormItem label={t('profile.currentPassword')} required={true} error={errors.oldPassword}>
             <Input
               type="password"
               prefix="lock"
-              placeholder="请输入当前密码"
+              placeholder={t('profile.currentPasswordPlaceholder')}
               value={oldPassword}
               onInput={(v) => { oldPassword = v; errors = { ...errors, oldPassword: '' } }}
             />
           </FormItem>
 
-          <FormItem label="新密码" required={true} error={errors.newPassword}>
+          <FormItem label={t('profile.newPassword')} required={true} error={errors.newPassword}>
             <Input
               type="password"
               prefix="lock"
-              placeholder="请输入新密码"
+              placeholder={t('profile.newPasswordPlaceholder')}
               value={newPassword}
               onInput={(v) => { newPassword = v; errors = { ...errors, newPassword: '', confirmPassword: '' } }}
             />
           </FormItem>
 
-          <FormItem label="确认新密码" required={true} error={errors.confirmPassword}>
+          <FormItem label={t('profile.confirmPassword')} required={true} error={errors.confirmPassword}>
             <Input
               type="password"
               prefix="lock"
-              placeholder="请再次输入新密码"
+              placeholder={t('profile.confirmPasswordPlaceholder')}
               value={confirmPassword}
               onInput={(v) => { confirmPassword = v; errors = { ...errors, confirmPassword: '' } }}
             />
           </FormItem>
 
           <FormItem label="">
-            <Button type="primary" htmlType="submit" loading={submitting} tooltip="验证旧密码后修改登录密码">修改密码</Button>
+            <Button type="primary" htmlType="submit" loading={submitting} tooltip={t('profile.changeTooltip')}>{t('profile.changePassword')}</Button>
           </FormItem>
         </Form>
       </Card>

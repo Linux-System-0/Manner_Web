@@ -1,5 +1,7 @@
 <script lang="ts">
   // Switch：开关
+  import { t } from '$lib/i18n'
+
   let {
     checked = false,
     disabled = false,
@@ -20,7 +22,7 @@
   class:ant-switch-disabled={disabled}
   role="switch"
   aria-checked={checked}
-  aria-label="开关"
+  aria-label={t('component.switch')}
   disabled={disabled || loading}
   onclick={() => onChange?.(!checked)}
 >

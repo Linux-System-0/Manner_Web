@@ -240,6 +240,8 @@ export interface LoginPageInfo {
   login_site_icon?: string
   site_icon?: string
   registration_open?: boolean
+  /** 默认语言包：system（跟随系统） | 语言代码（如 en-US / zh-CN，取决于 locales/ 目录） */
+  default_language?: string
 }
 
 export interface SystemSettings {

@@ -1,6 +1,7 @@
 <script lang="ts">
   // Table：数据表格（复刻 antd 5 视觉；支持列 snippet 渲染与分页）
   import type { Snippet } from 'svelte'
+  import { t } from '$lib/i18n'
   import Spin from './Spin.svelte'
   import Empty from './Empty.svelte'
   import Pagination from './Pagination.svelte'
@@ -32,7 +33,7 @@
     rowKey,
     loading = false,
     pagination,
-    emptyText = '暂无数据',
+    emptyText = t('common.noData'),
     scroll,
     snippets = {} as Record<string, Snippet<[never]>>,
     size = 'default',

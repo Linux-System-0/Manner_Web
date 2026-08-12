@@ -230,7 +230,7 @@ pub async fn login(
     if employee.status != 1 {
         append_log(
             &state.config.log_file,
-            &format!("用户 {} ({}) 登录被拒绝: 账号已禁用", employee.name, employee.username),
+            &format!("User {} ({}) login rejected: account disabled", employee.name, employee.username),
             &ip,
         );
         return Err(AppError::InvalidCredentials);
@@ -244,7 +244,7 @@ pub async fn login(
 
     append_log(
         &state.config.log_file,
-        &format!("用户 {} ({}) 登录成功", employee.name, employee.username),
+        &format!("User {} ({}) logged in successfully", employee.name, employee.username),
         &ip,
     );
 
@@ -643,7 +643,7 @@ pub async fn first_login(
 
     append_log(
         &state.config.log_file,
-        &format!("用户 {} ({}) 首次登录设置密码成功", employee.name, employee.username),
+        &format!("User {} ({}) set password on first login successfully", employee.name, employee.username),
         &ip,
     );
 

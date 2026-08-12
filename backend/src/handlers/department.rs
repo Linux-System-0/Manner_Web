@@ -235,7 +235,7 @@ pub async fn create_department(
 
     append_log(
         &state.config.log_file,
-        &format!("用户 {} 创建了部门 {}", user_tag(&auth.name, &auth.username), name),
+        &format!("User {} created department {}", user_tag(&auth.name, &auth.username), name),
         &ip,
     );
 
@@ -341,7 +341,7 @@ pub async fn update_department(
 
     append_log(
         &state.config.log_file,
-        &format!("用户 {} 更新了部门 {}", user_tag(&auth.name, &auth.username), id),
+        &format!("User {} updated department {}", user_tag(&auth.name, &auth.username), id),
         &ip,
     );
 
@@ -386,7 +386,7 @@ pub async fn delete_department(
 
     append_log(
         &state.config.log_file,
-        &format!("用户 {} 删除了部门 {}", user_tag(&auth.name, &auth.username), id),
+        &format!("User {} deleted department {}", user_tag(&auth.name, &auth.username), id),
         &ip,
     );
 
@@ -454,7 +454,7 @@ pub async fn update_employee_departments(
     append_log(
         &state.config.log_file,
         &format!(
-            "用户 {} 更新了员工 {} 的归属部门",
+            "User {} updated department membership of employee {}",
             user_tag(&auth.name, &auth.username),
             employee_id
         ),

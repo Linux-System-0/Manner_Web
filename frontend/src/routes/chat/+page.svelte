@@ -7,6 +7,7 @@
   import { page } from '$app/stores'
   import { authStore } from '$lib/stores/auth'
   import { formatTime, getGlobalPrefs, subscribe as subscribePrefs, preferencesStore } from '$lib/stores/preferences'
+  import { t } from '$lib/i18n'
   import { getMe } from '$lib/api/auth'
   import {
     getConversations,
@@ -263,13 +264,13 @@
     try {
       const res = await sendMessage(selectedConv, { content: text, msg_type: 'text' })
       if (res.code !== 0 || !res.data) {
-        message.error(res.message || '发送失败')
+        message.error(res.message || t('chat.sendFailed'))
         return
       }
       messages = [...messages, res.data]
       await fetchConversations()
     } catch (err) {
-      message.error(getApiError(err, '发送失败'))
+      message.error(getApiError(err, t('chat.sendFailed')))
     }
   }
 
@@ -284,13 +285,13 @@
         file_name: file.name,
       })
       if (res.code !== 0 || !res.data) {
-        message.error(res.message || '发送文件失败')
+        message.error(res.message || t('chat.sendFileFailed'))
         return
       }
       messages = [...messages, res.data]
       await fetchConversations()
     } catch (err) {
-      message.error((err as Error).message || getApiError(err, '发送文件失败'))
+      message.error((err as Error).message || getApiError(err, t('chat.sendFileFailed')))
     }
   }
 
@@ -334,10 +335,10 @@
     try {
       const res = await blockUser(blockedId)
       if (res.code !== 0) {
-        message.error(res.message || '操作失败')
+        message.error(res.message || t('common.operationFailed'))
         return
       }
-      message.success('已拉黑')
+      message.success(t('chat.blocked'))
       await fetchBlocked()
       settingsOpen = false
       const conv = conversations.find((c) => {
@@ -347,7 +348,7 @@
       })
       if (conv) selectedConv = null
     } catch (err) {
-      message.error(getApiError(err, '操作失败'))
+      message.error(getApiError(err, t('common.operationFailed')))
     }
   }
 
@@ -356,10 +357,10 @@
     try {
       const res = await unblockUser(blockedId)
       if (res.code !== 0) {
-        message.error(res.message || '操作失败')
+        message.error(res.message || t('common.operationFailed'))
         return
       }
-      message.success('已取消拉黑')
+      message.success(t('chat.unblocked'))
       await fetchBlocked()
       const conv = conversations.find((c) => {
         if (c.type !== 'single') return false
@@ -368,7 +369,7 @@
       })
       if (conv) selectedConv = null
     } catch (err) {
-      message.error(getApiError(err, '操作失败'))
+      message.error(getApiError(err, t('common.operationFailed')))
     }
   }
 
@@ -394,13 +395,13 @@
       // 备注仅自己可见：写入当前用户自己的 group_note
       const res = await updateParticipant(settingsConv.id, $authStore.user?.id || '', { group_note: myNickname })
       if (res.code !== 0) {
-        message.error(res.message || '操作失败')
+        message.error(res.message || t('common.operationFailed'))
         return
       }
-      message.success('备注已更新')
+      message.success(t('chat.remarkUpdated'))
       await fetchConversations()
     } catch (err) {
-      message.error(getApiError(err, '操作失败'))
+      message.error(getApiError(err, t('common.operationFailed')))
     }
   }
 
@@ -409,13 +410,13 @@
     try {
       const res = await updateConversationName(settingsConv.id, newGroupName)
       if (res.code !== 0) {
-        message.error(res.message || '操作失败')
+        message.error(res.message || t('common.operationFailed'))
         return
       }
-      message.success('群名已更新')
+      message.success(t('chat.groupNameUpdated'))
       await fetchConversations()
     } catch (err) {
-      message.error(getApiError(err, '操作失败'))
+      message.error(getApiError(err, t('common.operationFailed')))
     }
   }
 
@@ -424,13 +425,13 @@
     try {
       const res = await updateParticipant(settingsConv.id, $authStore.user?.id || '', { nickname: myNickname || '' })
       if (res.code !== 0) {
-        message.error(res.message || '操作失败')
+        message.error(res.message || t('common.operationFailed'))
         return
       }
-      message.success('群昵称已更新')
+      message.success(t('chat.nicknameUpdated'))
       await fetchConversations()
     } catch (err) {
-      message.error(getApiError(err, '操作失败'))
+      message.error(getApiError(err, t('common.operationFailed')))
     }
   }
 
@@ -439,13 +440,13 @@
     try {
       const res = await updateParticipant(settingsConv.id, $authStore.user?.id || '', { group_note: groupNote || '' })
       if (res.code !== 0) {
-        message.error(res.message || '操作失败')
+        message.error(res.message || t('common.operationFailed'))
         return
       }
-      message.success('群聊备注已更新')
+      message.success(t('chat.groupNoteUpdated'))
       await fetchConversations()
     } catch (err) {
-      message.error(getApiError(err, '操作失败'))
+      message.error(getApiError(err, t('common.operationFailed')))
     }
   }
 
@@ -456,15 +457,15 @@
       // 此处直接用 client 调用后端正确路由 DELETE /chat/conversations/:id/disband。
       const res = await client.delete<null>(`/chat/conversations/${settingsConv.id}/disband`)
       if (res.code !== 0) {
-        message.error(res.message || '操作失败')
+        message.error(res.message || t('common.operationFailed'))
         return
       }
-      message.success('群聊已解散')
+      message.success(t('chat.disbanded'))
       settingsOpen = false
       if (selectedConv === settingsConv.id) selectedConv = null
       await fetchConversations()
     } catch (err) {
-      message.error(getApiError(err, '操作失败'))
+      message.error(getApiError(err, t('common.operationFailed')))
     }
   }
 
@@ -491,13 +492,13 @@
     try {
       const res = await updateParticipant(settingsConv.id, targetId, { role })
       if (res.code !== 0) {
-        message.error(res.message || '操作失败')
+        message.error(res.message || t('common.operationFailed'))
         return
       }
-      message.success('角色已更新')
+      message.success(t('chat.roleUpdated'))
       await refreshSettings()
     } catch (err) {
-      message.error(getApiError(err, '操作失败'))
+      message.error(getApiError(err, t('common.operationFailed')))
     }
   }
 
@@ -506,13 +507,13 @@
     try {
       const res = await removeParticipant(settingsConv.id, targetId)
       if (res.code !== 0) {
-        message.error(res.message || '操作失败')
+        message.error(res.message || t('common.operationFailed'))
         return
       }
-      message.success('已移除')
+      message.success(t('chat.memberRemoved'))
       await refreshSettings()
     } catch (err) {
-      message.error(getApiError(err, '操作失败'))
+      message.error(getApiError(err, t('common.operationFailed')))
     }
   }
 
@@ -531,15 +532,15 @@
     try {
       const res = await addParticipant(settingsConv.id, addUserId)
       if (res.code !== 0) {
-        message.error(res.message || '操作失败')
+        message.error(res.message || t('common.operationFailed'))
         return
       }
-      message.success('已添加')
+      message.success(t('chat.addSuccess'))
       addUserModal = false
       addUserId = null
       await refreshSettings()
     } catch (err) {
-      message.error(getApiError(err, '操作失败'))
+      message.error(getApiError(err, t('common.operationFailed')))
     }
   }
 
@@ -557,25 +558,25 @@
 
   async function createGroup() {
     if (!createGroupName.trim()) {
-      message.error('请输入群聊名称')
+      message.error(t('chat.errGroupName'))
       return
     }
     if (createGroupMembers.length === 0) {
-      message.error('请至少选择 1 名成员')
+      message.error(t('chat.errMember'))
       return
     }
     try {
       const res = await createGroupConversation(createGroupName.trim(), createGroupMembers)
       if (res.code !== 0 || !res.data) {
-        message.error(res.message || '创建失败')
+        message.error(res.message || t('common.createdFailed'))
         return
       }
-      message.success('群聊已创建')
+      message.success(t('chat.created'))
       createGroupModal = false
       await fetchConversations()
       selectedConv = res.data.id
     } catch (err) {
-      message.error(getApiError(err, '创建失败'))
+      message.error(getApiError(err, t('common.createdFailed')))
     }
   }
 
@@ -588,10 +589,10 @@
   }
 
   function getConvName(conv: Conversation): string {
-    if (conv.type === 'group') return conv.my_group_note || conv.name || '群聊'
+    if (conv.type === 'group') return conv.my_group_note || conv.name || t('chat.group')
     const other = conv.participants.find((p) => p.id !== selfIdOf(conv))
     const otherInfo = conv.participants.find((p) => p.id === other?.id)
-    return conv.my_group_note || otherInfo?.nickname || other?.name || '未知'
+    return conv.my_group_note || otherInfo?.nickname || other?.name || t('chat.unknown')
   }
 
   function getOtherAvatar(conv: Conversation): string | undefined {
@@ -686,7 +687,7 @@
     <div
       style="width:44px;flex-shrink:0;display:flex;flex-direction:column;align-items:center;padding-top:12px;transition:width 0.2s"
     >
-      <Tooltip title="展开会话列表">
+      <Tooltip title={t('chat.expandList')}>
         <Button type="text" onClick={() => (chatCollapsed = false)}>
           {#snippet icon()}<Icon name="right" style="font-size:16px" />{/snippet}
         </Button>
@@ -700,9 +701,9 @@
       >
         {#snippet title()}
           <div style="display:flex;justify-content:space-between;align-items:center;width:100%">
-            <span>会话</span>
+            <span>{t('chat.conversations')}</span>
             <div style="display:flex;gap:4px;align-items:center">
-              <Tooltip title="黑名单">
+              <Tooltip title={t('chat.blockList')}>
                 <Button
                   size="small"
                   onClick={() => {
@@ -714,26 +715,26 @@
                 </Button>
               </Tooltip>
               {#if $authStore.permissions.includes('chat:group_create')}
-                <Tooltip title="创建群聊">
+                <Tooltip title={t('chat.createGroup')}>
                   <Button size="small" onClick={openCreateGroup}>
                     {#snippet icon()}<Icon name="plus" />{/snippet}
                   </Button>
                 </Tooltip>
               {/if}
               {#if reorderMode}
-                <Tooltip title="完成排序">
+                <Tooltip title={t('chat.finishSort')}>
                   <Button size="small" type="primary" onClick={() => (reorderMode = false)}>
                     {#snippet icon()}<Icon name="check" />{/snippet}
                   </Button>
                 </Tooltip>
               {:else}
-                <Tooltip title="调整会话顺序">
+                <Tooltip title={t('chat.adjustOrder')}>
                   <Button size="small" onClick={() => (reorderMode = true)}>
                     {#snippet icon()}<Icon name="holder" />{/snippet}
                   </Button>
                 </Tooltip>
               {/if}
-              <Tooltip title="收起会话列表">
+              <Tooltip title={t('chat.collapseList')}>
                 <Button size="small" onClick={() => (chatCollapsed = true)}>
                   {#snippet icon()}<Icon name="menu-fold" />{/snippet}
                 </Button>
@@ -743,13 +744,13 @@
         {/snippet}
 
         {#if reorderMode}
-          <div style="font-size:12px;color:#999;padding:0 4px 8px">拖拽列表项调整会话顺序</div>
+          <div style="font-size:12px;color:#999;padding:0 4px 8px">{t('chat.reorderHint')}</div>
         {/if}
 
         {#if loading}
           <div style="text-align:center;padding:40px 0"><Spin /></div>
         {:else}
-          <List hasData={orderedConversations.length > 0} emptyText="暂无会话">
+          <List hasData={orderedConversations.length > 0} emptyText={t('chat.noConversations')}>
             {#each orderedConversations as conv, index (conv.id)}
               <!-- 会话行可点击/可拖拽排序：li 按按钮语义暴露，豁免 a11y 静态检查 -->
               <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role, a11y_no_noninteractive_tabindex -->
@@ -784,7 +785,7 @@
                 <div style="flex:1;min-width:0">
                   <Text style="font-size:13px;font-weight:600">{getConvName(conv)}</Text>
                   <Text type="secondary" ellipsis={true} style="font-size:12px;margin-top:2px">
-                    {conv.last_message || '暂无消息'}
+                    {conv.last_message || t('chat.noMessages')}
                   </Text>
                 </div>
                 {#if conv.last_time}
@@ -817,15 +818,15 @@
             </Avatar>
             <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{getConvName(selectedConvData)}</span>
             {#if selectedConvData.type === 'group'}
-              <Text type="secondary" style="font-size:12px">({selectedConvData.participants.length} 人)</Text>
+              <Text type="secondary" style="font-size:12px">{t('chat.peopleCount', { count: selectedConvData.participants.length })}</Text>
             {/if}
           </div>
-          <Button type="text" tooltip="打开聊天设置" onClick={() => openSettings(selectedConvData)}>
+          <Button type="text" tooltip={t('chat.settingsTooltip')} onClick={() => openSettings(selectedConvData)}>
             {#snippet icon()}<Icon name="setting" />{/snippet}
           </Button>
         </div>
       {:else}
-        消息
+        {t('chat.messages')}
       {/if}
     {/snippet}
 
@@ -833,7 +834,7 @@
       <div
         bind:this={messagesContainerEl}
         role="region"
-        aria-label="消息列表，可拖放文件发送"
+        aria-label={t('chat.messageAria')}
         style="flex:1;overflow:auto;padding:16px;position:relative;min-height:0"
         ondragenter={handleDragEnter}
         ondragover={handleDragOver}
@@ -844,13 +845,13 @@
           <div
             style="position:absolute;inset:8px;border:2px dashed #1677ff;border-radius:8px;background:rgba(22,119,255,0.08);display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:10"
           >
-            <span style="font-size:16px;color:#1677ff">松开鼠标发送文件</span>
+            <span style="font-size:16px;color:#1677ff">{t('chat.releaseToSend')}</span>
           </div>
         {/if}
         {#if msgLoading}
           <div style="text-align:center;padding:40px 0"><Spin /></div>
         {:else if messages.length === 0}
-          <div style="text-align:center;color:#999;margin-top:60px">暂无消息</div>
+          <div style="text-align:center;color:#999;margin-top:60px">{t('chat.noMessages')}</div>
         {:else}
           {#each messages as msg (msg.id)}
             {@const isMe = msg.sender_id === (msg.my_id || $authStore.user?.id)}
@@ -869,7 +870,7 @@
               </Avatar>
               <div style="max-width:60%">
                 <div style="text-align:{isMe ? 'right' : 'left'};font-size:11px;color:#999;margin-bottom:2px">
-                  {isMe ? '我' : msg.sender_name}
+                  {isMe ? t('chat.me') : msg.sender_name}
                 </div>
                 <div
                   style="background:{isMe ? '#1677ff' : 'var(--chat-msg-other-bg)'};color:{isMe ? '#fff' : 'var(--chat-msg-other-color)'};padding:6px 12px;border-radius:12px;border-bottom-right-radius:{isMe ? 4 : 12}px;border-bottom-left-radius:{isMe ? 12 : 4}px;font-size:13px;word-break:break-word"
@@ -886,7 +887,7 @@
                         <Icon name="paper-clip" /> {name}
                       </a>
                     {:else}
-                      <span style="color:{isMe ? '#fff' : '#1677ff'}"><Icon name="paper-clip" /> {name}（文件链接无效）</span>
+                      <span style="color:{isMe ? '#fff' : '#1677ff'}"><Icon name="paper-clip" /> {name} ({t('chat.invalidFileLink')})</span>
                     {/if}
                   {:else}
                     {msg.content}
@@ -904,7 +905,7 @@
 
       <div style="padding:8px 16px;border-top:1px solid var(--chat-border-color)">
         <div style="display:flex;gap:8px;align-items:flex-end">
-          <Button tooltip="选择并发送文件或图片" onClick={() => fileInputEl?.click()}>
+          <Button tooltip={t('chat.fileTooltip')} onClick={() => fileInputEl?.click()}>
             {#snippet icon()}<Icon name="paper-clip" />{/snippet}
           </Button>
           <input bind:this={fileInputEl} type="file" style="display:none" onchange={handleFileSend} />
@@ -912,29 +913,29 @@
             bind:this={textareaEl}
             class="chat-input"
             value={inputText}
-            placeholder="输入消息..."
+            placeholder={t('chat.inputPlaceholder')}
             rows={1}
             oninput={onTextareaInput}
             onkeydown={onTextareaKeydown}
           ></textarea>
-          <Button type="primary" tooltip="发送当前消息" onClick={handleSend}>
-            {#snippet icon()}<Icon name="send" />{/snippet}发送
+          <Button type="primary" tooltip={t('chat.sendTooltip')} onClick={handleSend}>
+            {#snippet icon()}<Icon name="send" />{/snippet}{t('chat.send')}
           </Button>
         </div>
       </div>
     {:else}
       <div style="text-align:center;color:#999;margin-top:120px">
         <Icon name="message" style="font-size:48px;margin-bottom:16px" />
-        <div>选择一个会话开始聊天</div>
+        <div>{t('chat.selectConv')}</div>
       </div>
     {/if}
   </Card>
 </div>
 
 <!-- 黑名单 -->
-<Modal title="黑名单" open={blockModal} onclose={() => (blockModal = false)}>
+<Modal title={t('chat.blockModalTitle')} open={blockModal} onclose={() => (blockModal = false)}>
   {#if blockedUsers.length === 0}
-    <Empty description="暂无拉黑的用户" />
+    <Empty description={t('chat.noBlocked')} />
   {:else}
     <ul style="list-style:none;margin:0;padding:0">
       {#each blockedUsers as item (item.id)}
@@ -946,7 +947,7 @@
             <Avatar><span style="display:inline-flex"><Icon name="user" /></span></Avatar>
             <span>{item.name}</span>
           </div>
-          <Button size="small" tooltip="将此人移出黑名单，恢复聊天" onClick={() => handleUnblock(item.id)}>取消拉黑</Button>
+          <Button size="small" tooltip={t('chat.unblockTooltip')} onClick={() => handleUnblock(item.id)}>{t('chat.unblock')}</Button>
         </li>
       {/each}
     </ul>
@@ -955,29 +956,29 @@
 
 <!-- 创建群聊 -->
 <Modal
-  title="创建群聊"
+  title={t('chat.createGroupModalTitle')}
   open={createGroupModal}
   onOk={createGroup}
   onclose={() => (createGroupModal = false)}
-  okText="创建"
-  cancelText="取消"
+  okText={t('chat.createGroup')}
+  cancelText={t('common.cancel')}
   width={480}
 >
   <div style="display:flex;flex-direction:column;gap:16px">
     <div>
-      <div style="font-weight:600;margin-bottom:8px">群聊名称</div>
+      <div style="font-weight:600;margin-bottom:8px">{t('chat.groupNameLabel')}</div>
       <Input
         value={createGroupName}
         onInput={(v) => (createGroupName = v)}
-        placeholder="请输入群聊名称（≤128 字）"
+        placeholder={t('chat.groupNamePlaceholder')}
         maxlength={128}
       />
     </div>
     <div>
-      <div style="font-weight:600;margin-bottom:8px">选择成员</div>
+      <div style="font-weight:600;margin-bottom:8px">{t('chat.membersLabel')}</div>
       <Select
         multiple
-        placeholder="选择成员（可多选）"
+        placeholder={t('chat.memberSelectPlaceholder')}
         value={createGroupMembers}
         onChange={(v) => (createGroupMembers = Array.isArray(v) ? v.map(String) : [])}
         options={allEmployees.map((e) => ({ value: e.id, label: e.name }))}
@@ -987,24 +988,24 @@
 </Modal>
 
 <!-- 聊天设置 -->
-<Modal title="聊天设置" open={settingsOpen} onclose={() => (settingsOpen = false)} width={600}>
+<Modal title={t('chat.settings')} open={settingsOpen} onclose={() => (settingsOpen = false)} width={600}>
   {#if settingsConv}
     {#if settingsConv.type === 'single'}
       <div style="margin-bottom:16px">
-        <span style="font-weight:600">备注</span>
+        <span style="font-weight:600">{t('chat.remark')}</span>
         <div style="display:flex;gap:8px;margin-top:8px">
-          <Input value={myNickname} onInput={(v) => (myNickname = v)} placeholder="给对方设置备注（仅自己可见）" />
-          <Button tooltip="保存此备注" onClick={save1v1Remark}>保存</Button>
+          <Input value={myNickname} onInput={(v) => (myNickname = v)} placeholder={t('chat.remarkPlaceholder')} />
+          <Button tooltip={t('chat.remarkTooltip')} onClick={save1v1Remark}>{t('common.save')}</Button>
         </div>
       </div>
       <div>
-        <span style="font-weight:600">操作</span>
+        <span style="font-weight:600">{t('chat.operations')}</span>
         <div style="margin-top:8px">
           {#if isBlocked(otherUserId)}
-            <Button danger tooltip="将此人移出黑名单，恢复聊天" onClick={() => handleUnblock(otherUserId)}>取消拉黑</Button>
+            <Button danger tooltip={t('chat.unblockTooltip')} onClick={() => handleUnblock(otherUserId)}>{t('chat.unblock')}</Button>
           {:else}
-            <Button danger tooltip="拉黑该用户，不再接收其消息" onClick={() => handleBlock(otherUserId)}>
-              {#snippet icon()}<Icon name="stop" />{/snippet}拉黑
+            <Button danger tooltip={t('chat.blockTooltip')} onClick={() => handleBlock(otherUserId)}>
+              {#snippet icon()}<Icon name="stop" />{/snippet}{t('chat.block')}
             </Button>
           {/if}
         </div>
@@ -1012,40 +1013,40 @@
     {:else}
       {#if settingsConv.my_role === 'admin'}
         <div style="margin-bottom:16px">
-          <span style="font-weight:600">群聊名称</span>
+          <span style="font-weight:600">{t('chat.groupName')}</span>
           <div style="display:flex;gap:8px;margin-top:8px">
             <Input value={newGroupName} onInput={(v) => (newGroupName = v)} />
-            <Button tooltip="保存群聊名称" onClick={saveGroupName}>保存</Button>
+            <Button tooltip={t('chat.saveGroupNameTooltip')} onClick={saveGroupName}>{t('common.save')}</Button>
           </div>
         </div>
         <div style="margin-bottom:16px">
-          <Popconfirm title="确定解散群聊？此操作不可恢复！" onConfirm={disbandGroup}>
-            <Button danger tooltip="解散该群聊，此操作不可恢复">
-              {#snippet icon()}<Icon name="delete" />{/snippet}解散群聊
+          <Popconfirm title={t('chat.disbandConfirm')} onConfirm={disbandGroup}>
+            <Button danger tooltip={t('chat.disbandTooltip')}>
+              {#snippet icon()}<Icon name="delete" />{/snippet}{t('chat.disbandGroup')}
             </Button>
           </Popconfirm>
         </div>
       {/if}
       <div style="margin-bottom:16px">
-        <span style="font-weight:600">我的群昵称</span>
+        <span style="font-weight:600">{t('chat.myNickname')}</span>
         <div style="display:flex;gap:8px;margin-top:8px">
-          <Input value={myNickname} onInput={(v) => (myNickname = v)} placeholder="设置我在群内的显示名称" />
-          <Button tooltip="保存我的群昵称" onClick={saveMyNickname}>保存</Button>
+          <Input value={myNickname} onInput={(v) => (myNickname = v)} placeholder={t('chat.myNicknamePlaceholder')} />
+          <Button tooltip={t('chat.saveNicknameTooltip')} onClick={saveMyNickname}>{t('common.save')}</Button>
         </div>
       </div>
       <div style="margin-bottom:16px">
-        <span style="font-weight:600">群聊备注</span>
+        <span style="font-weight:600">{t('chat.groupNote')}</span>
         <div style="display:flex;gap:8px;margin-top:8px">
-          <Input value={groupNote} onInput={(v) => (groupNote = v)} placeholder="设置后覆盖群聊名称显示" />
-          <Button tooltip="保存群聊备注" onClick={saveGroupNote}>保存</Button>
+          <Input value={groupNote} onInput={(v) => (groupNote = v)} placeholder={t('chat.groupNotePlaceholder')} />
+          <Button tooltip={t('chat.saveGroupNote')} onClick={saveGroupNote}>{t('common.save')}</Button>
         </div>
-        <div style="margin-top:4px;font-size:12px;color:#999">设置后，会话列表中将以备注名称显示该群聊</div>
+        <div style="margin-top:4px;font-size:12px;color:#999">{t('chat.groupNoteHint')}</div>
       </div>
       <div>
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-          <span style="font-weight:600">成员管理</span>
+          <span style="font-weight:600">{t('chat.memberManagement')}</span>
           {#if settingsConv.my_role === 'admin'}
-            <Button type="text" size="small" tooltip="添加新成员" onClick={openAddUser}>
+            <Button type="text" size="small" tooltip={t('chat.addMemberTooltip')} onClick={openAddUser}>
               {#snippet icon()}<Icon name="plus" />{/snippet}
             </Button>
           {/if}
@@ -1062,23 +1063,23 @@
                 </Avatar>
                 <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{p.name}</span>
                 {#if p.role === 'admin'}
-                  <Tag color="gold"><span style="display:inline-flex"><Icon name="crown" /></span>管理员</Tag>
+                  <Tag color="gold"><span style="display:inline-flex"><Icon name="crown" /></span>{t('chat.admin')}</Tag>
                 {/if}
                 {#if p.nickname}<Text type="secondary">({p.nickname})</Text>{/if}
               </div>
               {#if settingsConv.my_role === 'admin' && p.id !== $authStore.user?.id}
                 <div style="display:flex;gap:4px;flex-shrink:0">
                   {#if p.role === 'admin'}
-                    <Button type="text" size="small" style="border-radius:50%" tooltip="降为普通成员" onClick={() => changeRole(p.id, 'member')}>
+                    <Button type="text" size="small" style="border-radius:50%" tooltip={t('chat.demoteTooltip')} onClick={() => changeRole(p.id, 'member')}>
                       {#snippet icon()}<Icon name="swap" />{/snippet}
                     </Button>
                   {:else}
-                    <Button type="text" size="small" style="border-radius:50%" tooltip="设为管理员" onClick={() => changeRole(p.id, 'admin')}>
+                    <Button type="text" size="small" style="border-radius:50%" tooltip={t('chat.promoteTooltip')} onClick={() => changeRole(p.id, 'admin')}>
                       {#snippet icon()}<Icon name="crown" />{/snippet}
                     </Button>
                   {/if}
-                  <Popconfirm title="确定移除该成员？" onConfirm={() => removeMember(p.id)}>
-                    <Button type="text" size="small" danger={true} style="border-radius:50%" tooltip="移除该成员">
+                  <Popconfirm title={t('chat.removeMemberConfirm')} onConfirm={() => removeMember(p.id)}>
+                    <Button type="text" size="small" danger={true} style="border-radius:50%" tooltip={t('chat.removeMemberTooltip')}>
                       {#snippet icon()}<Icon name="minus-circle" />{/snippet}
                     </Button>
                   </Popconfirm>
@@ -1094,18 +1095,18 @@
 
 <!-- 添加成员 -->
 <Modal
-  title="添加成员"
+  title={t('chat.addMemberModalTitle')}
   open={addUserModal}
   onOk={addMember}
   onclose={() => {
     addUserModal = false
     addUserId = null
   }}
-  okText="添加"
-  cancelText="取消"
+  okText={t('chat.addMember')}
+  cancelText={t('common.cancel')}
 >
   <Select
-    placeholder="选择成员"
+    placeholder={t('chat.addMemberPlaceholder')}
     value={addUserId ?? undefined}
     onChange={(v) => (addUserId = typeof v === 'string' ? v : null)}
     options={allEmployees

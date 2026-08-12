@@ -1,4 +1,5 @@
 import { client } from './client'
+import { t } from '@/i18n'
 import type { ApiResponse, LoginPageInfo, LogsData, PermissionModule, SystemSettings } from '@/types'
 
 export async function getLoginPage(): Promise<ApiResponse<LoginPageInfo>> {
@@ -29,7 +30,7 @@ export async function uploadImage(file: File): Promise<string> {
   formData.append('file', file)
   const res = await client.upload<unknown>('/upload', formData)
   const uploadJson = res as { data?: unknown; message?: string }
-  if (!uploadJson.data) throw new Error(uploadJson.message || '上传失败')
+  if (!uploadJson.data) throw new Error(uploadJson.message || t('settings.uploadFailed'))
   return uploadJson.data as string
 }
 

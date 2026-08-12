@@ -1,10 +1,11 @@
 <script lang="ts">
   // Empty：空态占位
   import { Icon } from '$lib/icons'
+  import { t } from '$lib/i18n'
   import type { Snippet } from 'svelte'
 
   let {
-    description = '暂无数据',
+    description = t('common.noData'),
     image,
     children,
   }: {

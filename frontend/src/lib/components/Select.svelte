@@ -1,6 +1,7 @@
 <script lang="ts">
   // Select：下拉选择（复刻 antd 5 视觉；含 multiple / allowClear / 下拉面板）
   import { Icon } from '$lib/icons'
+  import { t } from '$lib/i18n'
   import { onMount, tick } from 'svelte'
 
   export interface SelectOption {
@@ -112,7 +113,7 @@
         class="ant-select-clear"
         role="button"
         tabindex={-1}
-        aria-label="清除"
+        aria-label={t('common.clear')}
         onclick={clear}
         onkeydown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -132,7 +133,7 @@
         {#if options.length === 0}
           <div class="ant-empty">
             <div class="ant-empty-image"><Icon name="message" style="font-size:40px;color:var(--ant-color-text-quaternary)" /></div>
-            <p class="ant-empty-description" style="color:var(--ant-color-text-tertiary);font-size:14px">暂无数据</p>
+            <p class="ant-empty-description" style="color:var(--ant-color-text-tertiary);font-size:14px">{t('common.noData')}</p>
           </div>
         {:else}
           {#each options as opt (opt.value)}

@@ -1,4 +1,5 @@
 import { client } from './client'
+import { t } from '@/i18n'
 import type { ApiResponse, ChatMessage, Conversation } from '@/types'
 
 export async function getConversations(): Promise<ApiResponse<Conversation[]>> {
@@ -119,6 +120,6 @@ export async function uploadChatFile(file: File): Promise<string> {
   formData.append('file', file)
   const res = await client.upload<unknown>('/upload/file', formData)
   const uploadJson = res as { data?: unknown; message?: string }
-  if (!uploadJson.data) throw new Error(uploadJson.message || '上传失败')
+  if (!uploadJson.data) throw new Error(uploadJson.message || t('settings.uploadFailed'))
   return uploadJson.data as string
 }

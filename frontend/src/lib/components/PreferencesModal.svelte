@@ -1,6 +1,7 @@
 <script lang="ts">
   // 个人设置弹窗（复刻原 React PreferencesModal.tsx）
   // 主题 / 新建会话位置 / 时区；确认时写入 preferencesStore
+  import { t } from '$lib/i18n'
   import Modal from './Modal.svelte'
   import Radio from './Radio.svelte'
   import Input from './Input.svelte'
@@ -25,11 +26,13 @@
     const offsetMin = new Date().getTimezoneOffset()
     const hours = -Math.round(offsetMin / 60)
     const sign = hours >= 0 ? '+' : ''
-    return `跟随系统（UTC${sign}${hours}）`
+    return t('preferences.followSystemTz', { sign, hours })
   }
 
   function getSystemThemeLabel(): string {
-    return getEffectiveTheme('system') === 'dark' ? '跟随系统（深色）' : '跟随系统（浅色）'
+    return getEffectiveTheme('system') === 'dark'
+      ? t('preferences.followSystemDark')
+      : t('preferences.followSystemLight')
   }
 
   function getTzLabel(val: string): string {
@@ -46,7 +49,7 @@
     if (tzMode === 'manual') {
       const trimmed = offsetStr.trim()
       if (!/^[+-]?\d+$/.test(trimmed)) {
-        message.error('时区偏移格式错误，请输入 +/- 和数字，例如 +8 或 -5')
+        message.error(t('preferences.tzOffsetFormatError'))
         return
       }
       preferencesStore.updateTimezoneOffset(Number(trimmed))
@@ -57,20 +60,20 @@
 
   function onOffsetInput(v: string) {
     if (v !== '' && !/^[+-]?\d*$/.test(v)) {
-      message.warning('仅允许 +/- 和数字')
+      message.warning(t('preferences.tzOffsetOnly'))
       return
     }
     offsetStr = v
   }
 </script>
 
-<Modal open={open} title="个人设置" width={480} onclose={onClose} onOk={handleOk} okText="确认">
+<Modal open={open} title={t('preferences.title')} width={480} onclose={onClose} onOk={handleOk} okText={t('preferences.confirm')}>
   <div style="margin-bottom:24px">
-    <Title level={5}>主题</Title>
+    <Title level={5}>{t('preferences.theme')}</Title>
     <Radio
       options={[
-        { value: 'light', label: '浅色' },
-        { value: 'dark', label: '深色' },
+        { value: 'light', label: t('preferences.light') },
+        { value: 'dark', label: t('preferences.dark') },
         { value: 'system', label: getSystemThemeLabel() },
       ]}
       value={themeVal}
@@ -79,11 +82,11 @@
   </div>
 
   <div style="margin-bottom:24px">
-    <Title level={5}>新建会话位置</Title>
+    <Title level={5}>{t('preferences.newConvPosition')}</Title>
     <Radio
       options={[
-        { value: 'first', label: '最前' },
-        { value: 'last', label: '最后' },
+        { value: 'first', label: t('preferences.first') },
+        { value: 'last', label: t('preferences.last') },
       ]}
       value={newConvPos}
       onChange={(v) => (newConvPos = String(v) as 'first' | 'last')}
@@ -91,12 +94,12 @@
   </div>
 
   <div>
-    <Title level={5}>时区</Title>
+    <Title level={5}>{t('preferences.timezone')}</Title>
     <Space direction="vertical" style="width:100%" align="start">
       <Radio
         options={[
           { value: 'system', label: getSystemTzLabel() },
-          { value: 'manual', label: '手动' },
+          { value: 'manual', label: t('preferences.manual') },
         ]}
         value={tzMode}
         onChange={(v) => (tzMode = String(v) as 'system' | 'manual')}
@@ -104,7 +107,7 @@
       {#if tzMode === 'manual'}
         <Space>
           <Text>{getTzLabel(offsetStr)}</Text>
-          <Input value={offsetStr} onInput={onOffsetInput} style="width:120px" placeholder="例如 +8 或 -5" />
+          <Input value={offsetStr} onInput={onOffsetInput} style="width:120px" placeholder={t('preferences.tzOffsetPlaceholder')} />
         </Space>
       {/if}
     </Space>

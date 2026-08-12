@@ -6,6 +6,7 @@
   import { onMount } from 'svelte'
   import { authStore } from '$lib/stores/auth'
   import { client } from '$lib/api/client'
+  import { t } from '$lib/i18n'
   import Card from '$lib/components/Card.svelte'
   import Row from '$lib/components/Row.svelte'
   import Col from '$lib/components/Col.svelte'
@@ -67,11 +68,11 @@
 
 <div>
   <Title level={4} style="margin-bottom:24px">
-    欢迎回来，{$authStore.user?.name || $authStore.user?.username}
+    {t('dashboard.welcome', { name: $authStore.user?.name || $authStore.user?.username || '' })}
   </Title>
 
   {#if canSettings}
-    <Card title="系统运行状态" style="margin-bottom:24px">
+    <Card title={t('dashboard.systemStatus')} style="margin-bottom:24px">
       {#if healthLoading}
         <Spin />
       {:else if health}
@@ -81,8 +82,8 @@
               <div style="display:flex;align-items:center;gap:8px">
                 {@render statusIcon(CLOUD_SERVER_PATHS, '#1677ff')}
                 <div>
-                  <div style="font-size:12px;color:#999">服务状态</div>
-                  <div style="font-weight:600">运行中 v{health.version}</div>
+                  <div style="font-size:12px;color:#999">{t('dashboard.server')}</div>
+                  <div style="font-weight:600">{t('dashboard.running', { version: health.version })}</div>
                 </div>
               </div>
             </Card>
@@ -96,9 +97,9 @@
                   {@render statusIcon(CLOSE_CIRCLE_PATHS, '#ff4d4f')}
                 {/if}
                 <div>
-                  <div style="font-size:12px;color:#999">数据库</div>
+                  <div style="font-size:12px;color:#999">{t('dashboard.database')}</div>
                   <div style="font-weight:600">
-                    {health.database === 'connected' ? '已连接' : '断开'}
+                    {health.database === 'connected' ? t('dashboard.connected') : t('dashboard.disconnected')}
                   </div>
                 </div>
               </div>
@@ -106,28 +107,28 @@
           </Col>
         </Row>
       {:else}
-        <Text type="warning">获取系统状态失败</Text>
+        <Text type="warning">{t('dashboard.statusFailed')}</Text>
       {/if}
     </Card>
   {/if}
 
-  <Card title="个人信息">
+  <Card title={t('dashboard.personalInfo')}>
     <table style="width:100%;border-collapse:collapse">
       <tbody>
         <tr>
-          <td class="dash-desc-label">用户名</td>
+          <td class="dash-desc-label">{t('dashboard.username')}</td>
           <td class="dash-desc-value">{$authStore.user?.username ?? ''}</td>
-          <td class="dash-desc-label">姓名</td>
+          <td class="dash-desc-label">{t('dashboard.name')}</td>
           <td class="dash-desc-value">{$authStore.user?.name ?? ''}</td>
         </tr>
         <tr>
-          <td class="dash-desc-label">邮箱</td>
+          <td class="dash-desc-label">{t('dashboard.email')}</td>
           <td class="dash-desc-value">{$authStore.user?.email ?? ''}</td>
-          <td class="dash-desc-label">职位</td>
+          <td class="dash-desc-label">{t('dashboard.title')}</td>
           <td class="dash-desc-value">{$authStore.user?.title || '-'}</td>
         </tr>
         <tr>
-          <td class="dash-desc-label">手机号</td>
+          <td class="dash-desc-label">{t('dashboard.phone')}</td>
           <td class="dash-desc-value">{$authStore.user?.phone || '-'}</td>
         </tr>
       </tbody>

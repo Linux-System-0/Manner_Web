@@ -110,6 +110,9 @@ CREATE TABLE IF NOT EXISTS system_settings (
 -- F-07: 首个管理员注册开关（默认开启，注册成功后关闭，防并发抢注）
 INSERT IGNORE INTO system_settings (setting_key, setting_value) VALUES ('registration_open', '1');
 
+-- 默认语言包（system=跟随系统/浏览器语言；en-US / zh-CN=手动指定）
+INSERT IGNORE INTO system_settings (setting_key, setting_value) VALUES ('default_language', 'en-US');
+
 -- 登录限流参数(可在系统设置界面调整,无需重启,环境变量为兜底默认值)
 INSERT IGNORE INTO system_settings (setting_key, setting_value) VALUES ('login_max_failures', '5');
 INSERT IGNORE INTO system_settings (setting_key, setting_value) VALUES ('login_lock_window_secs', '900');

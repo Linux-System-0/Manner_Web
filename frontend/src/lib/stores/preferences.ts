@@ -5,6 +5,7 @@
 // - 保留全局 pub/sub（getGlobalPrefs/subscribe），供 Chat 等非组件模块使用
 import { writable, get } from 'svelte/store'
 import { client } from '@/api/client'
+import { i18nState } from '@/i18n'
 
 export type ThemeMode = 'light' | 'dark' | 'system'
 export type TimezoneMode = 'system' | 'manual'
@@ -84,7 +85,7 @@ export function formatTimestamp(iso: string, prefs: Preferences): string {
   if (prefs.timezoneMode === 'manual') {
     return formatUtcWall(d.getTime() + prefs.timezoneOffset * 3600000)
   }
-  return d.toLocaleString('zh-CN', { hour12: false })
+  return d.toLocaleString(i18nState.locale, { hour12: false })
 }
 
 // 聊天消息/会话时间：统一 年-月-日 时:分:秒（manual 时区用 UTC 墙钟字段，其余用本地时区）

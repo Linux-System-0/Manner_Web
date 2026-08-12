@@ -1,6 +1,7 @@
 <script lang="ts">
   // Input：普通 / Password / TextArea（复刻 antd 5 视觉）
   import { Icon } from '$lib/icons'
+  import { t } from '$lib/i18n'
 
   let {
     type = 'text',
@@ -76,7 +77,7 @@
         class="ant-input-suffix"
         role="button"
         tabindex={0}
-        aria-label="切换密码可见性"
+        aria-label={t('component.togglePassword')}
         onclick={() => (showPassword = !showPassword)}
         onkeydown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {

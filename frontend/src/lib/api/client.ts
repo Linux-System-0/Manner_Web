@@ -161,7 +161,7 @@ async function request<T>(
   try {
     data = (await res.json()) as ApiResponse<T>
   } catch {
-    data = { code: res.status, message: res.statusText || '请求失败', data: null as T }
+    data = { code: res.status, message: res.statusText || 'Request failed', data: null as T }
   }
   return data
 }

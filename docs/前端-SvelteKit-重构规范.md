@@ -1,7 +1,7 @@
 # Manner_Web 前端-SvelteKit-重构规范
 
 > 本文是 SvelteKit 重构**完成之后**的编码规范（当前代码库已全面迁移到
-> SvelteKit 5 + Svelte 5 + Vite 8 + TypeScript 5，纯 SPA，自研组件库），
+> SvelteKit 5 + Svelte 5 + Vite 8 + TypeScript 5，纯 SPA，自研组件库，内置 i18n），
 > 不是"进行中"记录。所有规范均以 `frontend/src` 现有代码为基准，新代码必须遵守。
 > 技术栈与目录结构总览见 [前端开发指南.md](./前端开发指南.md)。
 
@@ -9,6 +9,7 @@
 
 - 技术基线：SvelteKit 5（`@sveltejs/kit ^2.70`）、Svelte 5（`svelte ^5.56`，runes 语法）、Vite 8（`vite ^8.2`）、TypeScript 5（`typescript ^5.6`，`strict: true`）、`@sveltejs/adapter-static ^3` 纯 SPA（`fallback: 'index.html'`，`+layout.ts` 中 `ssr=false`、`prerender=false`）。
 - **无 React / antd 运行时依赖**：全部组件自研于 `src/lib/components/`，`package.json` 全部为 devDependencies，无任何运行时依赖。
+- **国际化**：文案一律走 `src/lib/i18n` 的 `t()`（语言包 `en-US.json`/`zh-CN.json`，`en-US` 兜底）；不硬编码中文/英文文案。
 - 唯一质量门禁：`npm run check`（`svelte-kit sync && svelte-check --tsconfig ./tsconfig.json`）必须零错误通过；发布前另执行 `npm run build`。
 
 ## 1. 组件开发规范
@@ -44,10 +45,10 @@
 
 ### 2.1 路由组织
 
-- 路由文件：`src/routes/<path>/+page.svelte`，动态参数用 `[id]` 目录（如 `employees/[id]/edit`）。当前共 9 个页面路由（`/`、`/login`、`/chat`、`/employees`、`/employees/new`、`/employees/[id]/edit`、`/logs`、`/profile`、`/settings`），清单见《前端开发指南.md》。
+- 路由文件：`src/routes/<path>/+page.svelte`，动态参数用 `[id]` 目录（如 `employees/[id]/edit`）。当前共 12 个页面路由（`/`、`/login`、`/chat`、`/employees`、`/employees/new`、`/employees/[id]/edit`、`/employees/[id]/sensitive`、`/departments`、`/roles`、`/logs`、`/profile`、`/settings`），清单见《前端开发指南.md》。
 - 纯 SPA：不写 `+server.ts` / `+page.ts` 数据加载（`+layout.ts` 固定 `ssr=false`、`prerender=false`），数据在组件 `onMount` 中拉取。
 - 页面目录只放该页私有组件；可复用组件放 `src/lib/components/`。
-- 受权限控制的页面/菜单项：在 `src/lib/components/Layout.svelte` 的 `menuItems` 中按权限码控制（如 `authStore.hasPermission('employee:list')`、`authStore.hasPermission('system:settings')`）。
+- 受权限控制的页面/菜单项：在 `src/lib/components/Layout.svelte` 的 `menuItems` 中按权限码控制（如 `authStore.hasPermission('employee:list')`、`authStore.hasPermission('department:list')`、`authStore.hasPermission('role:manage')`、`authStore.hasPermission('system:settings')`）。
 
 ### 2.2 数据加载
 
@@ -85,8 +86,8 @@
 
 ## 3. API 调用规范
 
-- **统一走 `src/lib/api/`，禁止在页面/组件里散落 `fetch`**（`client.ts` 已封装前缀、Cookie、超时、401 刷新）。
-- 每个业务域一个模块文件（`auth.ts` / `chat.ts` / `employees.ts` / `system.ts`），导出类型化的 `async function`，内部调用 `client.get/post/put/delete/upload`。
+- **统一走 `src/lib/api/`，禁止在页面/组件里散落 `fetch`**（`client.ts` 已封装前缀、Cookie、超时、401 刷新、CSRF）。
+- 每个业务域一个模块文件（`auth.ts` / `chat.ts` / `employees.ts` / `departments.ts` / `roles.ts` / `system.ts`），导出类型化的 `async function`，内部调用 `client.get/post/put/delete/upload`。
 - 返回类型使用 `ApiResponse<T>`；列表返回 `PaginatedResponse<T>`（`ApiResponse<PaginatedData<T>>`，`data` 为 `{ items, total, page, page_size }`）。
 - 上传文件：`client.upload(url, formData)`；图片走 `/upload`，任意文件走 `/upload/file`（`uploadImage` / `uploadChatFile` 已封装，返回 `/uploads/...` 相对路径字符串）。
 - 不通过 URL 传敏感信息；参数放 `body` 或 `params`（`client` 会自动忽略空值）。
@@ -100,14 +101,21 @@
 - 非组件模块需要读取偏好时用 `getGlobalPrefs()` / `subscribe()`。
 - 导航用 `goto`（`$app/navigation`），读取路由参数用 `$page`（`$app/stores`），不直接操作 `window.location`（登出跳转等特殊场景除外）。
 
-## 5. 类型规范
+## 5. 国际化规范
 
-- 所有与后端契约对齐的类型集中在 `src/lib/types/index.ts`（`User`、`Employee`、`Permission`、`PermissionModule`、`ApiResponse<T>`、`PaginatedData<T>` / `PaginatedResponse<T>`、请求体类型等），以 `backend/src/models` 源码为准。
+- 文案统一走 `t('key')`（`src/lib/i18n/index.ts`），key 按页面/模块命名空间组织（如 `menu.employees`、`login.username`）。
+- 新文案同步维护 `locales/en-US.json` 与 `locales/zh-CN.json`（en-US 为兜底语言，`t()` 缺 key 时回退 en-US，再缺失原样返回 key）。
+- 语言模式 `'system'` / 具体语言代码由后端 `default_language` 决定，页面不自行读取 `navigator.language` 设置全局语言；如需强制刷新语言调用 `initI18n(true)`。
+- 动态文案（含变量）用函数形式或模板拼接，语言包内保留占位符。
+
+## 6. 类型规范
+
+- 所有与后端契约对齐的类型集中在 `src/lib/types/index.ts`（`User`、`Employee`、`Permission`、`PermissionModule`、`Role`、`Department`、`Conversation`、`ApiResponse<T>`、`PaginatedData<T>` / `PaginatedResponse<T>`、请求体类型等），以 `backend/src/models` 源码为准。
 - 页面/组件内部派生类型就地定义或放入 `types/index.ts`，不散落重复定义。
 - TS 配置为 `strict: true`；新代码不得出现 `any`（确有必要时用 `unknown` + 收窄）。
 - 组件 props 必须显式标注类型（`$props<{ ... }>()` 或内联类型），禁止隐式 `any`。
 
-## 6. 代码质量
+## 7. 代码质量
 
 - **`npm run check` 必须通过**（svelte-check 会做组件类型、模板绑定、store 类型全量校验），这是提交/合并的前置门禁。
 - 提交前执行：

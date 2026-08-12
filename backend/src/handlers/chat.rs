@@ -636,7 +636,7 @@ pub async fn send_message(
     append_log(
         &state.config.log_file,
         &format!(
-            "用户 {} 在会话 {} 中发送了消息: {}",
+            "User {} sent a message in conversation {}: {}",
             user_tag(&auth.name, &auth.username),
             conv_id,
             msg_preview
@@ -669,7 +669,7 @@ async fn resolve_employee_display(pool: &sqlx::Pool<sqlx::MySql>, id: &str) -> S
         .ok()
         .flatten()
         .map(|e| format!("{} ({})", e.name, e.username))
-        .unwrap_or_else(|| format!("[已删除: {}]", id))
+        .unwrap_or_else(|| format!("[deleted: {}]", id))
 }
 
 pub async fn block_user(
@@ -698,7 +698,7 @@ pub async fn block_user(
     append_log(
         &state.config.log_file,
         &format!(
-            "用户 {} 拉黑了用户 {}",
+            "User {} blocked user {}",
             user_tag(&auth.name, &auth.username),
             target
         ),
@@ -724,7 +724,7 @@ pub async fn unblock_user(
     append_log(
         &state.config.log_file,
         &format!(
-            "用户 {} 取消了拉黑 {}",
+            "User {} unblocked {}",
             user_tag(&auth.name, &auth.username),
             target
         ),

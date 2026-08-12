@@ -1,11 +1,12 @@
 <script lang="ts">
   // DatePicker：日期选择（月历面板，value 为 YYYY-MM-DD）
   import { Icon } from '$lib/icons'
+  import { t } from '$lib/i18n'
   import { onMount } from 'svelte'
 
   let {
     value = '',
-    placeholder = '请选择日期',
+    placeholder = t('employee.form.placeholderHireDate'),
     onChange,
     disabled = false,
     style = '',
@@ -39,7 +40,7 @@
     }
   })
 
-  let weekdays = ['日', '一', '二', '三', '四', '五', '六']
+  let weekdays = $derived(t('datepicker.weekdays').split(','))
   let cells = $derived.by(() => {
     const first = new Date(viewYear, viewMonth, 1)
     const startWeek = first.getDay()
@@ -129,17 +130,17 @@
         class="ant-picker-header-super-prev-btn"
         role="button"
         tabindex={0}
-        aria-label="上个月"
+        aria-label={t('datepicker.prevMonth')}
         onclick={prevMonth}
         onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); prevMonth() } }}
         style="cursor:pointer;color:var(--ant-color-text-tertiary);display:inline-flex"
       ><Icon name="left" style="font-size:12px" /></span>
-      <span style="font-weight:600;color:var(--ant-color-text)">{viewYear} 年 {viewMonth + 1} 月</span>
+      <span style="font-weight:600;color:var(--ant-color-text)">{t('datepicker.yearMonth', { year: viewYear, month: viewMonth + 1 })}</span>
       <span
         class="ant-picker-header-next-btn"
         role="button"
         tabindex={0}
-        aria-label="下个月"
+        aria-label={t('datepicker.nextMonth')}
         onclick={nextMonth}
         onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); nextMonth() } }}
         style="cursor:pointer;color:var(--ant-color-text-tertiary);display:inline-flex"

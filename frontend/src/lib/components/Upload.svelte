@@ -1,5 +1,6 @@
 <script lang="ts">
   // Upload：文件上传（隐藏 input，点击触发；beforeUpload 返回 false 时调用方自行上传）
+  import { t } from '$lib/i18n'
   import type { Snippet } from 'svelte'
 
   let {
@@ -40,7 +41,7 @@
   style="display:inline-flex"
   role="button"
   tabindex={disabled ? -1 : 0}
-  aria-label="上传文件"
+  aria-label={t('common.upload')}
   onclick={() => !disabled && inputEl?.click()}
   onkeydown={(e) => {
     if (disabled) return

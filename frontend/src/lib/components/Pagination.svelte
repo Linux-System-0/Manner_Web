@@ -1,5 +1,6 @@
 <script lang="ts">
   // Pagination：分页（antd 视觉：页码方块、当前页主色）
+  import { t } from '$lib/i18n'
   import { Icon } from '$lib/icons'
 
   let {
@@ -52,9 +53,9 @@
   <li
     class="ant-pagination-prev"
     class:ant-pagination-disabled={current <= 1}
-    title="上一页"
+    title={t('common.prevPage')}
   >
-    <button class="ant-pagination-item-link" type="button" aria-label="上一页" tabindex={current <= 1 ? -1 : 0} onclick={() => go(current - 1)}>
+    <button class="ant-pagination-item-link" type="button" aria-label={t('common.prevPage')} tabindex={current <= 1 ? -1 : 0} onclick={() => go(current - 1)}>
       <Icon name="left" style="font-size:12px" />
     </button>
   </li>
@@ -72,7 +73,7 @@
         <a
           rel="nofollow"
           href={`javascript:void(0)`}
-          aria-label={`第 ${p} 页`}
+          aria-label={t('common.page', { page: p })}
           onclick={(e) => { e.preventDefault(); go(p) }}
         >{p}</a>
       </li>
@@ -81,9 +82,9 @@
   <li
     class="ant-pagination-next"
     class:ant-pagination-disabled={current >= pageCount}
-    title="下一页"
+    title={t('common.nextPage')}
   >
-    <button class="ant-pagination-item-link" type="button" aria-label="下一页" tabindex={current >= pageCount ? -1 : 0} onclick={() => go(current + 1)}>
+    <button class="ant-pagination-item-link" type="button" aria-label={t('common.nextPage')} tabindex={current >= pageCount ? -1 : 0} onclick={() => go(current + 1)}>
       <Icon name="right" style="font-size:12px" />
     </button>
   </li>

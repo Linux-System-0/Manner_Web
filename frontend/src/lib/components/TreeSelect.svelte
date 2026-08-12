@@ -1,13 +1,14 @@
 <script lang="ts">
   // TreeSelect：树形选择（上级部门选择用；复用 Tree 的层级渲染）
   import { Icon } from '$lib/icons'
+  import { t } from '$lib/i18n'
   import { onMount } from 'svelte'
   import type { TreeNode } from './Tree.svelte'
 
   let {
     treeData = [] as TreeNode[],
     value = '',
-    placeholder = '请选择',
+    placeholder = t('common.selectPlaceholder'),
     onChange,
     disabled = false,
     allowClear = false,
@@ -115,7 +116,7 @@
       <span
         role="button"
         tabindex={-1}
-        aria-label="清除"
+        aria-label={t('common.clear')}
         onclick={clear}
         onkeydown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -157,7 +158,7 @@
       <span
         role="button"
         tabindex={-1}
-        aria-label={expanded.includes(node.key) ? '折叠' : '展开'}
+        aria-label={expanded.includes(node.key) ? t('common.collapse') : t('common.expand')}
         style="width:18px;display:inline-flex;justify-content:center"
         onclick={(e) => { e.stopPropagation(); toggle(node.key) }}
         onkeydown={(e) => {

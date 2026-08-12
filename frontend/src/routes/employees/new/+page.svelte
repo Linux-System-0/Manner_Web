@@ -3,6 +3,7 @@
   import { goto } from '$app/navigation'
   import { authStore } from '$lib/stores/auth'
   import { getApiError } from '$lib/api/client'
+  import { t } from '$lib/i18n'
   import { createEmployee } from '$lib/api/employees'
   import Card from '$lib/components/Card.svelte'
   import Form from '$lib/components/Form.svelte'
@@ -31,10 +32,10 @@
 
   function validate(): boolean {
     const next: Record<string, string> = {}
-    if (!username.trim()) next.username = '请输入用户名'
-    else if (username.trim().length < 3) next.username = '用户名至少3个字符'
-    if (!name.trim()) next.name = '请输入姓名'
-    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) next.email = '请输入有效的邮箱地址'
+    if (!username.trim()) next.username = t('employee.form.errUsername')
+    else if (username.trim().length < 3) next.username = t('employee.form.errUsernameLen')
+    if (!name.trim()) next.name = t('employee.form.errName')
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) next.email = t('employee.form.errEmail')
     errors = next
     return Object.keys(next).length === 0
   }
@@ -54,7 +55,7 @@
         hire_date: hireDate || undefined,
       })
       if (res.code !== 0) {
-        message.error(res.message || '创建失败')
+        message.error(res.message || t('common.createdFailed'))
         return
       }
       // F-02: 后端生成一次性初始密码，仅在此响应中返回一次
@@ -64,10 +65,10 @@
         pwdModal = { open: true, password: initialPassword }
         return
       }
-      message.success('创建成功')
+      message.success(t('common.createdSuccess'))
       goto('/employees')
     } catch (err: unknown) {
-      message.error(getApiError(err, '创建失败'))
+      message.error(getApiError(err, t('common.createdFailed')))
     } finally {
       submitting = false
     }
@@ -75,100 +76,100 @@
 
   function closePwdModal() {
     pwdModal = { open: false, password: '' }
-    message.success('创建成功')
+    message.success(t('common.createdSuccess'))
     goto('/employees')
   }
 
   async function copyPwd() {
     try {
       await navigator.clipboard.writeText(pwdModal.password)
-      message.success('已复制到剪贴板')
+      message.success(t('common.copied'))
     } catch {
-      message.error('复制失败，请手动选择复制')
+      message.error(t('common.copyFailed'))
     }
   }
 </script>
 
 {#if !$authStore.permissions.includes('employee:create')}
-  <Result status="403" title="403" subTitle="抱歉，你无权访问该页面">
+  <Result status="403" title="403" subTitle={t('common.noAccess')}>
     {#snippet extra()}
-      <Button type="primary" tooltip="返回员工列表页" onClick={() => goto('/employees')}>返回列表</Button>
+      <Button type="primary" tooltip={t('common.backList')} onClick={() => goto('/employees')}>{t('common.backList')}</Button>
     {/snippet}
   </Result>
 {:else}
   <div style="height:100%;overflow:auto">
-    <Card title="新增员工" style="max-width:800px">
+    <Card title={t('employee.form.title')} style="max-width:800px">
       <Form class="ant-form-vertical" onSubmit={(e) => { e.preventDefault(); handleSubmit() }}>
-        <FormItem label="用户名" required={true} error={errors.username}>
+        <FormItem label={t('employee.form.username')} required={true} error={errors.username}>
           <Input
-            placeholder="请输入用户名"
+            placeholder={t('employee.form.placeholderUsername')}
             value={username}
             onInput={(v) => { username = v; errors = { ...errors, username: '' } }}
           />
         </FormItem>
 
-        <FormItem label="姓名" required={true} error={errors.name}>
+        <FormItem label={t('employee.form.name')} required={true} error={errors.name}>
           <Input
-            placeholder="请输入姓名"
+            placeholder={t('employee.form.placeholderName')}
             value={name}
             onInput={(v) => { name = v; errors = { ...errors, name: '' } }}
           />
         </FormItem>
 
-        <FormItem label="职位" error={errors.title}>
+        <FormItem label={t('employee.form.titleField')} error={errors.title}>
           <Input
-            placeholder="请输入职位"
+            placeholder={t('employee.form.placeholderTitle')}
             value={title}
             onInput={(v) => (title = v)}
           />
         </FormItem>
 
-        <FormItem label="邮箱" error={errors.email}>
+        <FormItem label={t('employee.form.email')} error={errors.email}>
           <Input
-            placeholder="请输入邮箱"
+            placeholder={t('employee.form.placeholderEmail')}
             value={email}
             onInput={(v) => { email = v; errors = { ...errors, email: '' } }}
           />
         </FormItem>
 
-        <FormItem label="手机号" error={errors.phone}>
+        <FormItem label={t('employee.form.phone')} error={errors.phone}>
           <Input
-            placeholder="请输入手机号"
+            placeholder={t('employee.form.placeholderPhone')}
             value={phone}
             onInput={(v) => (phone = v)}
           />
         </FormItem>
 
-        <FormItem label="身份证号" error={errors.id_number}>
+        <FormItem label={t('employee.form.idNumber')} error={errors.id_number}>
           <Input
-            placeholder="请输入身份证号"
+            placeholder={t('employee.form.placeholderIdNumber')}
             value={idNumber}
             onInput={(v) => (idNumber = v)}
           />
         </FormItem>
 
-        <FormItem label="地址" error={errors.address}>
+        <FormItem label={t('employee.form.address')} error={errors.address}>
           <Input
             type="textarea"
             rows={2}
-            placeholder="请输入地址"
+            placeholder={t('employee.form.placeholderAddress')}
             value={address}
             onInput={(v) => (address = v)}
           />
         </FormItem>
 
-        <FormItem label="入职日期" error={errors.hire_date}>
+        <FormItem label={t('employee.form.hireDate')} error={errors.hire_date}>
           <DatePicker
             value={hireDate}
-            placeholder="请选择日期"
+            placeholder={t('employee.form.placeholderHireDate')}
             onChange={(v) => (hireDate = v)}
           />
         </FormItem>
 
         <FormItem label="">
           <div style="display:flex;gap:12px">
-            <Button type="primary" htmlType="submit" loading={submitting} tooltip="提交表单，创建新员工">创建</Button>
-            <Button tooltip="放弃填写，返回员工列表" onClick={() => goto('/employees')}>取消</Button>
+            <Button type="primary" htmlType="submit" loading={submitting} tooltip={t('employee.form.createTooltip')}>{t('employee.form.create')}</Button>
+            <Button tooltip={t('employee.form.cancelTooltip')} onClick={() => goto('/employees')}>{t('common.cancel')}</Button>
           </div>
         </FormItem>
       </Form>
@@ -178,24 +179,24 @@
   <!-- F-08: 初始密码展示弹窗（一次性密码，禁止遮罩点击误关） -->
   <Modal
     open={pwdModal.open}
-    title="员工创建成功"
+    title={t('employee.form.createdTitle')}
     onclose={closePwdModal}
     onOk={closePwdModal}
-    okText="我知道了"
-    cancelText="关闭"
+    okText={t('employees.gotIt')}
+    cancelText={t('common.closeBtn')}
     maskClosable={false}
   >
     <div style="display:flex;flex-direction:column;gap:12px">
       <span style="color:var(--ant-color-text-secondary)">
-        账号已创建，以下为一次性初始密码（仅显示一次，请复制并妥善保存）：
+        {t('employee.form.createdNote')}
       </span>
       <div style="display:flex;align-items:center;gap:8px">
         <code
           style="flex:1;padding:8px 12px;border:1px solid var(--ant-color-border-secondary);border-radius:6px;background:var(--ant-color-fill-secondary);font-size:16px;letter-spacing:1px;user-select:all"
         >{pwdModal.password}</code>
-        <Button size="small" tooltip="复制初始密码到剪贴板" onClick={copyPwd}>复制</Button>
+        <Button size="small" tooltip={t('employees.copyInitialPwd')} onClick={copyPwd}>{t('common.copy')}</Button>
       </div>
-      <span style="color:var(--ant-color-warning)">员工首次登录后需修改密码</span>
+      <span style="color:var(--ant-color-warning)">{t('employee.form.mustChangePassword')}</span>
     </div>
   </Modal>
 {/if}

@@ -1,6 +1,7 @@
 <script lang="ts">
   // Modal：弹窗（复刻 antd 5 视觉：遮罩 + 居中 + header/body/footer）
   import type { Snippet } from 'svelte'
+  import { t } from '$lib/i18n'
   import Button from './Button.svelte'
   import { Icon } from '$lib/icons'
 
@@ -11,8 +12,8 @@
     footer,
     onclose,
     onOk,
-    okText = '确定',
-    cancelText = '取消',
+    okText = t('common.ok'),
+    cancelText = t('common.cancel'),
     confirmLoading = false,
     okDanger = false,
     maskClosable = true,
@@ -59,7 +60,7 @@
       <div class="ant-modal" role="dialog" aria-modal="true" style="width:{typeof width === 'number' ? width + 'px' : width}">
         <div class="ant-modal-content">
           {#if closable}
-            <button class="ant-modal-close" title="关闭" aria-label="关闭" onclick={onclose}>
+            <button class="ant-modal-close" title={t('common.closeBtn')} aria-label={t('common.closeBtn')} onclick={onclose}>
               <span class="ant-modal-close-x"><Icon name="close" /></span>
             </button>
           {/if}
@@ -75,8 +76,8 @@
             <div class="ant-modal-footer">{@render footer()}</div>
           {:else if onOk}
             <div class="ant-modal-footer">
-              <Button tooltip="关闭弹窗，不保存修改" onClick={onclose}>{cancelText}</Button>
-              <Button type="primary" danger={okDanger} loading={confirmLoading} tooltip="确认当前操作" onClick={onOk}>{okText}</Button>
+              <Button tooltip={t('common.closeDialogNoSave')} onClick={onclose}>{cancelText}</Button>
+              <Button type="primary" danger={okDanger} loading={confirmLoading} tooltip={t('common.confirmAction')} onClick={onOk}>{okText}</Button>
             </div>
           {/if}
         </div>

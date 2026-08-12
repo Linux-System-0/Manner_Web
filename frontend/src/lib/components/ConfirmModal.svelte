@@ -1,6 +1,7 @@
 <script lang="ts">
   // ConfirmModal：modal.confirm 的渲染宿主（由 modal.ts mount 单例挂载）
   // 状态通过 modal.ts 的 confirmState store 驱动（$confirmState 自动订阅）
+  import { t } from '$lib/i18n'
   import Modal from './Modal.svelte'
   import Button from './Button.svelte'
   import { Icon } from '$lib/icons'
@@ -32,8 +33,8 @@
     title={$confirmState.title}
     onclose={() => settleConfirm(false)}
     onOk={ok}
-    okText={$confirmState.okText ?? '确定'}
-    cancelText={$confirmState.cancelText ?? '取消'}
+    okText={$confirmState.okText ?? t('common.ok')}
+    cancelText={$confirmState.cancelText ?? t('common.cancel')}
     okDanger={$confirmState.okDanger}
     confirmLoading={submitting}
   >

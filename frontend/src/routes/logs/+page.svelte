@@ -4,6 +4,7 @@
   import { onMount, onDestroy } from 'svelte'
   import { authStore } from '$lib/stores/auth'
   import { getGlobalPrefs } from '$lib/stores/preferences'
+  import { t } from '$lib/i18n'
   import { getSystemLogs } from '$lib/api/system'
   import { Icon } from '$lib/icons'
   import Card from '$lib/components/Card.svelte'
@@ -73,14 +74,14 @@
     return `${y}-${m}-${day} ${h}:${min}:${s}`
   }
 
-  const LEVEL_OPTIONS: { value: LogLevel | 'ALL'; label: string; color: string }[] = [
-    { value: 'ALL', label: '全部', color: '#666' },
-    { value: 'ERROR', label: '错误', color: '#ff4d4f' },
-    { value: 'WARN', label: '警告', color: '#faad14' },
-    { value: 'INFO', label: '信息', color: '#1677ff' },
-    { value: 'DEBUG', label: '调试', color: '#52c41a' },
-    { value: 'LOG', label: '其他', color: '#888' },
-  ]
+  let LEVEL_OPTIONS: { value: LogLevel | 'ALL'; label: string; color: string }[] = $derived([
+    { value: 'ALL', label: t('logs.all'), color: '#666' },
+    { value: 'ERROR', label: t('logs.error'), color: '#ff4d4f' },
+    { value: 'WARN', label: t('logs.warn'), color: '#faad14' },
+    { value: 'INFO', label: t('logs.info'), color: '#1677ff' },
+    { value: 'DEBUG', label: t('logs.debug'), color: '#52c41a' },
+    { value: 'LOG', label: t('logs.other'), color: '#888' },
+  ])
 
   let allowed = $derived($authStore.permissions.includes('system:settings'))
 
@@ -98,7 +99,7 @@
       const res = await getSystemLogs(200)
       data = res.data
     } catch {
-      error = '获取日志失败'
+      error = t('logs.fetchFailed')
     } finally {
       loading = false
     }
@@ -157,9 +158,9 @@
 </script>
 
 {#if !allowed}
-  <Result status="403" title="403" subTitle="抱歉，您没有访问此页面的权限。">
+  <Result status="403" title="403" subTitle={t('common.noAccess')}>
     {#snippet extra()}
-      <Button type="primary" tooltip="返回上一页" onClick={() => window.history.back()}>返回</Button>
+      <Button type="primary" tooltip={t('common.backPrev')} onClick={() => window.history.back()}>{t('common.backPrev')}</Button>
     {/snippet}
   </Result>
 {:else}
@@ -170,7 +171,7 @@
           <div
             role="button"
             tabindex={0}
-            aria-label={`筛选${opt.label}日志`}
+            aria-label={t('logs.filterAria', { label: opt.label })}
             aria-pressed={levelFilter === opt.value}
             onclick={() => (levelFilter = levelFilter === opt.value ? 'ALL' : opt.value)}
             onkeydown={(e) => {
@@ -195,7 +196,7 @@
       {/each}
       <Col span={4}>
         <Card bodyStyle="padding:12px 16px">
-          <Statistic title="总计" value={data?.total || 0} />
+          <Statistic title={t('logs.total')} value={data?.total || 0} />
         </Card>
       </Col>
     </Row>
@@ -203,10 +204,10 @@
     <Card>
       {#snippet title()}
         <Space>
-          <span style="font-weight:600">应用日志</span>
+          <span style="font-weight:600">{t('logs.title')}</span>
           {#if data}
             <Text type="secondary" style="font-size:12px">
-              共 {data.total} 条，当前筛选 {filteredLines.length} 条
+              {t('logs.summary', { total: data.total, filtered: filteredLines.length })}
             </Text>
           {/if}
         </Space>
@@ -223,16 +224,16 @@
           </span>
           <Input
             size="small"
-            placeholder="搜索关键字"
+            placeholder={t('logs.searchPlaceholder')}
             prefix="search"
             value={keyword}
             onInput={(v) => (keyword = v)}
             style="width:180px"
           />
-          <Button size="small" tooltip="导出当前筛选的日志数据" onClick={handleExport}>导出</Button>
-          <Button size="small" tooltip="重新加载日志数据" onClick={fetchLogs} loading={loading}>
+          <Button size="small" tooltip={t('logs.exportTooltip')} onClick={handleExport}>{t('logs.export')}</Button>
+          <Button size="small" tooltip={t('logs.refreshTooltip')} onClick={fetchLogs} loading={loading}>
             {#snippet icon()}<Icon name="reload" />{/snippet}
-            刷新
+            {t('logs.refresh')}
           </Button>
         </Space>
       {/snippet}
@@ -242,7 +243,7 @@
       {:else if data}
         <div class="log-viewer">
           {#if filteredLines.length === 0}
-            <div style="color:#666;text-align:center;padding:40px">暂无匹配的日志</div>
+            <div style="color:#666;text-align:center;padding:40px">{t('logs.noMatch')}</div>
           {:else}
             {#each filteredLines as line, i (i)}
               {@const level = detectLevel(line)}
@@ -262,7 +263,7 @@
           <div bind:this={bottomEl}></div>
         </div>
       {:else}
-        <div style="text-align:center;padding:60px;color:#666">点击刷新加载日志</div>
+        <div style="text-align:center;padding:60px;color:#666">{t('logs.loadHint')}</div>
       {/if}
     </Card>
   </div>

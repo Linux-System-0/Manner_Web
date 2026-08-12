@@ -1,29 +1,21 @@
-# 构建产物
-backend/target/
-frontend/dist/
-frontend/build/
-frontend/.svelte-kit/
-frontend/node_modules/
-/node_modules/
+*target*/
+*dist*/
+*build*/
+*svelte-kit*/
+*node_modules*/
 
-# 日志
-*.log
-backend/logs/
+*log*/
+*log*
 
-# 敏感配置
 *env*
 !.env.example
 
-# 工具 / 临时脚本
 *codewhale*/
 *opencode*/
 *.py
 
-# 私钥/密钥文件
 *key*
-*.key*
 *id_rsa*
 *id_ed25519*
 
-# 上传产物
-backend/uploads/
+uploads/

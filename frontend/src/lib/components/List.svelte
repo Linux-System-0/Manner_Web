@@ -1,12 +1,13 @@
 <script lang="ts">
   // List：列表容器（Spin + 空态 + 自定义列表体）；行渲染由 ListItem.svelte 提供
   import type { Snippet } from 'svelte'
+  import { t } from '$lib/i18n'
   import Spin from './Spin.svelte'
   import Empty from './Empty.svelte'
 
   let {
     loading = false,
-    emptyText = '暂无数据',
+    emptyText = t('common.noData'),
     hasData = true,
     children,
     class: className = '',

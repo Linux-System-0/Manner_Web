@@ -12,6 +12,7 @@
   import { authStore } from '$lib/stores/auth'
   import { preferencesStore } from '$lib/stores/preferences'
   import { getMe } from '$lib/api/auth'
+  import { initI18n } from '$lib/i18n/init'
   import Layout from '$lib/components/Layout.svelte'
 
   let { children }: { children: Snippet } = $props()
@@ -47,6 +48,7 @@
   onMount(async () => {
     authStore.restoreLocal()
     await preferencesStore.initialize()
+    await initI18n()
 
     if (isLoginPage) {
       // 登录页自身管理显示逻辑；已登录访问 /login 时由登录页决定跳转

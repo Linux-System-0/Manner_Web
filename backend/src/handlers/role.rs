@@ -589,7 +589,7 @@ pub async fn create_role(
     append_log(
         &state.config.log_file,
         &format!(
-            "用户 {} 创建了角色 {}",
+            "User {} created role {}",
             user_tag(&auth.name, &auth.username),
             name
         ),
@@ -812,7 +812,7 @@ pub async fn update_role(
     append_log(
         &state.config.log_file,
         &format!(
-            "用户 {} 更新了角色 {}",
+            "User {} updated role {}",
             user_tag(&auth.name, &auth.username),
             id
         ),
@@ -864,7 +864,7 @@ pub async fn delete_role(
 
     append_log(
         &state.config.log_file,
-        &format!("用户 {} 删除了角色 {}", user_tag(&auth.name, &auth.username), id),
+        &format!("User {} deleted role {}", user_tag(&auth.name, &auth.username), id),
         &ip,
     );
 
@@ -944,7 +944,7 @@ pub async fn update_employee_roles(
     append_log(
         &state.config.log_file,
         &format!(
-            "用户 {} 更新了员工 {} 的角色",
+            "User {} updated roles of employee {}",
             user_tag(&auth.name, &auth.username),
             employee_id
         ),
@@ -1009,7 +1009,7 @@ pub async fn update_department_roles(
     append_log(
         &state.config.log_file,
         &format!(
-            "用户 {} 更新了部门 {} 的角色绑定",
+            "User {} updated role bindings of department {}",
             user_tag(&auth.name, &auth.username),
             department_id
         ),

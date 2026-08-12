@@ -7,6 +7,7 @@
   import { onMount } from 'svelte'
   import { page } from '$app/stores'
   import { goto } from '$app/navigation'
+  import { t } from '$lib/i18n'
   import { Icon } from '$lib/icons'
   import Menu from './Menu.svelte'
   import Dropdown from './Dropdown.svelte'
@@ -24,7 +25,7 @@
   let collapsed = $state(false)
   let prefOpen = $state(false)
   let themeMode = $state<'light' | 'dark'>('light')
-  let siteTitle = $state('企业管理系统')
+  let siteTitle = $state(t('login.siteTitle'))
   let siderWidth = $state(200)
   let titleEl: HTMLDivElement | undefined = $state()
 
@@ -90,32 +91,32 @@
   let selectedKey = $derived('/' + $page.url.pathname.split('/').filter(Boolean)[0])
 
   let menuItems = $derived([
-    { key: '/', label: '仪表盘', icon: 'dashboard' },
+    { key: '/', label: t('menu.dashboard'), icon: 'dashboard' },
     ...(authStore.hasPermission('employee:list')
-      ? [{ key: '/employees', label: '员工管理', icon: 'team' }]
+      ? [{ key: '/employees', label: t('menu.employees'), icon: 'team' }]
       : []),
     ...(authStore.hasPermission('department:list')
-      ? [{ key: '/departments', label: '部门管理', icon: 'idcard' }]
+      ? [{ key: '/departments', label: t('menu.departments'), icon: 'idcard' }]
       : []),
     ...(authStore.hasPermission('role:manage')
-      ? [{ key: '/roles', label: '角色管理', icon: 'lock' }]
+      ? [{ key: '/roles', label: t('menu.roles'), icon: 'lock' }]
       : []),
-    { key: '/chat', label: '聊天', icon: 'message' },
+    { key: '/chat', label: t('menu.chat'), icon: 'message' },
     ...(authStore.hasPermission('system:settings')
-      ? [{ key: '/logs', label: '应用日志', icon: 'file-text' }]
+      ? [{ key: '/logs', label: t('menu.logs'), icon: 'file-text' }]
       : []),
     ...(authStore.hasPermission('system:settings')
-      ? [{ key: '/settings', label: '系统设置', icon: 'setting' }]
+      ? [{ key: '/settings', label: t('menu.settings'), icon: 'setting' }]
       : []),
   ])
 
-  let userMenuItems = [
-    { key: 'profile', label: '个人资料', icon: 'user' },
+  let userMenuItems = $derived([
+    { key: 'profile', label: t('menu.profile'), icon: 'user' },
     { key: 'divider1', label: '', divider: true },
-    { key: 'preferences', label: '个人设置', icon: 'setting' },
+    { key: 'preferences', label: t('menu.preferences'), icon: 'setting' },
     { key: 'divider2', label: '', divider: true },
-    { key: 'logout', label: '退出登录', icon: 'logout', danger: true },
-  ]
+    { key: 'logout', label: t('menu.logout'), icon: 'logout', danger: true },
+  ])
 
   function onUserMenu(key: string) {
     if (key === 'profile') goto('/profile')
@@ -150,7 +151,7 @@
       class="ant-layout-header"
       style="padding:0 24px;background:var(--ant-layout-header-bg);display:flex;align-items:center;justify-content:space-between;box-shadow:0 1px 4px rgba(0,0,0,0.08);height:64px;line-height:64px"
     >
-      <Button type="text" tooltip={collapsed ? '展开侧边菜单' : '收起侧边菜单'} tooltipPosition="right" onClick={() => (collapsed = !collapsed)}>
+      <Button type="text" tooltip={collapsed ? t('menu.expandSidebar') : t('menu.collapseSidebar')} tooltipPosition="right" onClick={() => (collapsed = !collapsed)}>
         <span style="display:inline-flex"><Icon name={collapsed ? 'menu-unfold' : 'menu-fold'} style="font-size:16px" /></span>
       </Button>
       <Dropdown items={userMenuItems} onClick={onUserMenu} placement="bottomRight">

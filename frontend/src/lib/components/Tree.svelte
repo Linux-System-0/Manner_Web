@@ -1,6 +1,7 @@
 <script lang="ts">
   // Tree：树形（部门架构用；支持 action snippet 与选中）
   import type { Snippet } from 'svelte'
+  import { t } from '$lib/i18n'
   import { Icon } from '$lib/icons'
 
   export interface TreeNode {
@@ -83,7 +84,7 @@
         class="ant-tree-switcher"
         role="button"
         tabindex={-1}
-        aria-label={expanded.includes(node.key) ? '折叠' : '展开'}
+        aria-label={expanded.includes(node.key) ? t('common.collapse') : t('common.expand')}
         style="width:20px;display:inline-flex;justify-content:center;cursor:pointer"
         onclick={(e) => { e.stopPropagation(); if (node.children?.length) toggle(node.key) }}
         onkeydown={(e) => {

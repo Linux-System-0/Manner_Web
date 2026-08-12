@@ -8,6 +8,7 @@
   import { goto } from '$app/navigation'
   import { authStore } from '$lib/stores/auth'
   import { getEffectiveTheme, preferencesStore } from '$lib/stores/preferences'
+  import { t } from '$lib/i18n'
   import {
     login as loginApi,
     register as registerApi,
@@ -32,7 +33,7 @@
   // ---- 页面状态（对齐原版 useState） ----
   let loading = $state(false)
   let loginTheme = $state<'light' | 'dark' | 'system'>('system')
-  let siteTitle = $state('企业管理系统')
+  let siteTitle = $state(t('login.siteTitle'))
   let effectiveTheme = $state<'light' | 'dark'>('light')
   let mode = $state<Mode>('login')
   let step = $state<Step>('username')
@@ -73,7 +74,7 @@
     try {
       if (sessionStorage.getItem('manner-logout-reason') === 'kicked') {
         sessionStorage.removeItem('manner-logout-reason')
-        message.warning('该用户已在其他设备登录，请重新登录')
+        message.warning(t('login.kicked'))
       }
     } catch {
       /* ignore */
@@ -129,27 +130,27 @@
     /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/
 
   function checkUsernameStep(): boolean {
-    usernameError = usernameValue ? '' : '请输入用户名'
+    usernameError = usernameValue ? '' : t('login.errUsername')
     return !usernameError
   }
 
   function checkPasswordStep(): boolean {
-    passwordError = passwordValue ? '' : '请输入密码'
+    passwordError = passwordValue ? '' : t('login.errPassword')
     return !passwordError
   }
 
   function checkSetupStep(): boolean {
-    initialPasswordError = initialPassword ? '' : '请输入初始密码'
+    initialPasswordError = initialPassword ? '' : t('login.errInitialPassword')
     newPasswordError = newPassword
       ? newPassword.length >= 8
         ? ''
-        : '密码至少 8 位'
-      : '请输入新密码'
+        : t('login.errNewPasswordLen')
+      : t('login.errNewPassword')
     confirmNewPasswordError = confirmNewPassword
       ? confirmNewPassword === newPassword
         ? ''
-        : '两次输入的新密码不一致'
-      : '请再次输入新密码'
+        : t('login.errPasswordMismatch')
+      : t('login.errConfirmNewPassword')
     return !initialPasswordError && !newPasswordError && !confirmNewPasswordError
   }
 
@@ -157,20 +158,20 @@
     regUsernameError = regUsername
       ? regUsername.length >= 3 && regUsername.length <= 64
         ? ''
-        : '用户名长度为 3-64 个字符'
-      : '请输入用户名'
-    regNameError = regName ? '' : '请输入姓名'
-    regEmailError = regEmail && !EMAIL_RE.test(regEmail) ? '邮箱格式不正确' : ''
+        : t('login.errUsernameLen')
+      : t('login.errUsername')
+    regNameError = regName ? '' : t('login.errName')
+    regEmailError = regEmail && !EMAIL_RE.test(regEmail) ? t('login.errEmail') : ''
     regPasswordError = regPassword
       ? regPassword.length >= 8
         ? ''
-        : '密码至少 8 位'
-      : '请输入密码'
+        : t('login.errNewPasswordLen')
+      : t('login.errPassword')
     regConfirmError = regConfirm
       ? regConfirm === regPassword
         ? ''
-        : '两次输入的密码不一致'
-      : '请再次输入密码'
+        : t('login.errPasswordMismatch')
+      : t('login.errPassword')
     return (
       !regUsernameError &&
       !regNameError &&
@@ -183,29 +184,29 @@
   // ---- 输入事件（提交尝试后实时复检，对齐 antd 行为） ----
   function onUsernameInput(v: string) {
     usernameValue = v
-    if (loginAttempted) usernameError = v ? '' : '请输入用户名'
+    if (loginAttempted) usernameError = v ? '' : t('login.errUsername')
   }
 
   function onPasswordInput(v: string) {
     passwordValue = v
-    if (loginAttempted) passwordError = v ? '' : '请输入密码'
+    if (loginAttempted) passwordError = v ? '' : t('login.errPassword')
   }
 
   function onInitialPasswordInput(v: string) {
     initialPassword = v
-    if (setupAttempted) initialPasswordError = v ? '' : '请输入初始密码'
+    if (setupAttempted) initialPasswordError = v ? '' : t('login.errInitialPassword')
   }
 
   function onNewPasswordInput(v: string) {
     newPassword = v
     if (setupAttempted) {
-      newPasswordError = v ? (v.length >= 8 ? '' : '密码至少 8 位') : '请输入新密码'
+      newPasswordError = v ? (v.length >= 8 ? '' : t('login.errNewPasswordLen')) : t('login.errNewPassword')
       if (confirmNewPasswordError) {
         confirmNewPasswordError = confirmNewPassword
           ? confirmNewPassword === v
             ? ''
-            : '两次输入的新密码不一致'
-          : '请再次输入新密码'
+            : t('login.errPasswordMismatch')
+          : t('login.errConfirmNewPassword')
       }
     }
   }
@@ -216,8 +217,8 @@
       confirmNewPasswordError = v
         ? v === newPassword
           ? ''
-          : '两次输入的新密码不一致'
-        : '请再次输入新密码'
+          : t('login.errPasswordMismatch')
+        : t('login.errConfirmNewPassword')
     }
   }
 
@@ -227,31 +228,31 @@
       regUsernameError = v
         ? v.length >= 3 && v.length <= 64
           ? ''
-          : '用户名长度为 3-64 个字符'
-        : '请输入用户名'
+          : t('login.errUsernameLen')
+        : t('login.errUsername')
     }
   }
 
   function onRegNameInput(v: string) {
     regName = v
-    if (registerAttempted) regNameError = v ? '' : '请输入姓名'
+    if (registerAttempted) regNameError = v ? '' : t('login.errName')
   }
 
   function onRegEmailInput(v: string) {
     regEmail = v
-    if (registerAttempted) regEmailError = v && !EMAIL_RE.test(v) ? '邮箱格式不正确' : ''
+    if (registerAttempted) regEmailError = v && !EMAIL_RE.test(v) ? t('login.errEmail') : ''
   }
 
   function onRegPasswordInput(v: string) {
     regPassword = v
     if (registerAttempted) {
-      regPasswordError = v ? (v.length >= 8 ? '' : '密码至少 8 位') : '请输入密码'
+      regPasswordError = v ? (v.length >= 8 ? '' : t('login.errNewPasswordLen')) : t('login.errPassword')
       if (regConfirmError) {
         regConfirmError = regConfirm
           ? regConfirm === v
             ? ''
-            : '两次输入的密码不一致'
-          : '请再次输入密码'
+            : t('login.errPasswordMismatch')
+          : t('login.errPassword')
       }
     }
   }
@@ -262,8 +263,8 @@
       regConfirmError = v
         ? v === regPassword
           ? ''
-          : '两次输入的密码不一致'
-        : '请再次输入密码'
+          : t('login.errPasswordMismatch')
+        : t('login.errPassword')
     }
   }
 
@@ -283,7 +284,7 @@
       passwordValue = ''
       passwordError = ''
     } catch (err: unknown) {
-      message.error(getApiError(err, '校验失败，请重试'))
+      message.error(getApiError(err, t('login.checkFailed')))
     } finally {
       loading = false
     }
@@ -302,14 +303,14 @@
       await preferencesStore.refresh()
       // 兜底：若预检未命中但登录返回待改密标记，仍引导改密
       if (res.data.user.must_change_password) {
-        message.warning('首次登录请尽快修改密码')
+        message.warning(t('login.changePasswordHint'))
         goto('/profile', { replaceState: true })
       } else {
-        message.success('登录成功')
+        message.success(t('login.loginSuccess'))
         goto('/', { replaceState: true })
       }
     } catch (err: unknown) {
-      message.error(getApiError(err, '登录失败，请检查用户名和密码'))
+      message.error(getApiError(err, t('login.loginFailed')))
     } finally {
       loading = false
     }
@@ -321,7 +322,7 @@
     setupAttempted = true
     if (!checkSetupStep()) return
     if (newPassword !== confirmNewPassword) {
-      message.error('两次输入的新密码不一致')
+      message.error(t('login.errPasswordMismatch'))
       return
     }
     loading = true
@@ -334,10 +335,10 @@
       authStore.setAuth(res.data.user)
       // 个人设置按用户存于服务端：登录成功后重新拉取该用户的偏好
       await preferencesStore.refresh()
-      message.success('密码设置成功，已自动登录')
+      message.success(t('login.setupSuccess'))
       goto('/', { replaceState: true })
     } catch (err: unknown) {
-      message.error(getApiError(err, '密码设置失败，请检查当前密码'))
+      message.error(getApiError(err, t('login.setupFailed')))
     } finally {
       loading = false
     }
@@ -369,7 +370,7 @@
         name: regName,
         email: regEmail,
       })
-      message.success('注册成功，请使用新账号登录')
+      message.success(t('login.registerSuccess'))
       mode = 'login'
       // 对齐 antd：表单卸载即重置
       regUsername = ''
@@ -384,7 +385,7 @@
       regConfirmError = ''
       registerAttempted = false
     } catch (err: unknown) {
-      message.error(getApiError(err, '注册失败'))
+      message.error(getApiError(err, t('login.registerFailed')))
     } finally {
       loading = false
     }
@@ -405,15 +406,15 @@
           <FormItem error={usernameError}>
             <Input
               value={usernameValue}
-              placeholder="用户名"
+              placeholder={t('login.enterUsername')}
               prefix="user"
               size="large"
               onInput={onUsernameInput}
             />
           </FormItem>
           <FormItem>
-            <Button type="primary" htmlType="submit" block loading={loading} size="large" tooltip="校验用户名后进入密码登录">
-              下一步
+            <Button type="primary" htmlType="submit" block loading={loading} size="large" tooltip={t('login.checkUsername')}>
+              {t('login.next')}
             </Button>
           </FormItem>
         </Form>
@@ -423,19 +424,19 @@
             <Input
               type="password"
               value={passwordValue}
-              placeholder="密码"
+              placeholder={t('login.enterPassword')}
               prefix="lock"
               size="large"
               onInput={onPasswordInput}
             />
           </FormItem>
           <FormItem>
-            <Button type="primary" htmlType="submit" block loading={loading} size="large" tooltip="提交用户名和密码登录系统">
-              登 录
+            <Button type="primary" htmlType="submit" block loading={loading} size="large" tooltip={t('login.submitLogin')}>
+              {t('login.submit')}
             </Button>
           </FormItem>
           <div style="text-align:center">
-            <Button type="link" size="small" tooltip="返回上一步重新修改用户名" onClick={backToUsername}>返回修改用户名</Button>
+            <Button type="link" size="small" tooltip={t('login.backToUsernameTooltip')} onClick={backToUsername}>{t('login.backToUsername')}</Button>
           </div>
         </Form>
       {:else}
@@ -444,7 +445,7 @@
             <Input
               type="password"
               value={initialPassword}
-              placeholder="初始密码（创建账号/重置密码时下发）"
+              placeholder={t('login.initialPassword')}
               prefix="lock"
               size="large"
               onInput={onInitialPasswordInput}
@@ -454,7 +455,7 @@
             <Input
               type="password"
               value={newPassword}
-              placeholder="新密码（至少 8 位）"
+              placeholder={t('login.newPassword')}
               prefix="lock"
               size="large"
               onInput={onNewPasswordInput}
@@ -464,19 +465,19 @@
             <Input
               type="password"
               value={confirmNewPassword}
-              placeholder="确认新密码"
+              placeholder={t('login.confirmNewPassword')}
               prefix="lock"
               size="large"
               onInput={onConfirmNewPasswordInput}
             />
           </FormItem>
           <FormItem>
-            <Button type="primary" htmlType="submit" block loading={loading} size="large" tooltip="设置新密码并完成登录">
-              设置密码并登录
+            <Button type="primary" htmlType="submit" block loading={loading} size="large" tooltip={t('login.setupLogin')}>
+              {t('login.setupPassword')}
             </Button>
           </FormItem>
           <div style="text-align:center">
-            <Button type="link" size="small" tooltip="返回上一步重新修改用户名" onClick={backToUsername}>返回修改用户名</Button>
+            <Button type="link" size="small" tooltip={t('login.backToUsernameTooltip')} onClick={backToUsername}>{t('login.backToUsername')}</Button>
           </div>
         </Form>
       {/if}
@@ -485,7 +486,7 @@
         <FormItem error={regUsernameError}>
           <Input
             value={regUsername}
-            placeholder="用户名"
+            placeholder={t('login.enterUsername')}
             prefix="user"
             size="large"
             onInput={onRegUsernameInput}
@@ -494,7 +495,7 @@
         <FormItem error={regNameError}>
           <Input
             value={regName}
-            placeholder="姓名"
+            placeholder={t('login.enterName')}
             prefix="idcard"
             size="large"
             onInput={onRegNameInput}
@@ -503,7 +504,7 @@
         <FormItem error={regEmailError}>
           <Input
             value={regEmail}
-            placeholder="邮箱（可选）"
+            placeholder={t('login.emailOptional')}
             prefix="mail"
             size="large"
             onInput={onRegEmailInput}
@@ -513,7 +514,7 @@
           <Input
             type="password"
             value={regPassword}
-            placeholder="密码（至少 8 位）"
+            placeholder={t('login.password')}
             prefix="lock"
             size="large"
             onInput={onRegPasswordInput}
@@ -523,15 +524,15 @@
           <Input
             type="password"
             value={regConfirm}
-            placeholder="确认密码"
+            placeholder={t('login.confirmPassword')}
             prefix="lock"
             size="large"
             onInput={onRegConfirmInput}
           />
         </FormItem>
         <FormItem>
-          <Button type="primary" htmlType="submit" block loading={loading} size="large" tooltip="注册新账号">
-            注册
+          <Button type="primary" htmlType="submit" block loading={loading} size="large" tooltip={t('login.registerTooltip')}>
+            {t('login.register')}
           </Button>
         </FormItem>
       </Form>

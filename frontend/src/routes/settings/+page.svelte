@@ -5,6 +5,8 @@
   import { authStore } from '$lib/stores/auth'
   import { getSystemSettings, updateSystemSettings, uploadImage } from '$lib/api/system'
   import { getApiError } from '$lib/api/client'
+  import { t } from '$lib/i18n'
+  import { setLocale, supportedLocales, localeDisplayName, type LanguageMode } from '$lib/i18n'
   import { message } from '$lib/components/message'
   import Card from '$lib/components/Card.svelte'
   import Form from '$lib/components/Form.svelte'
@@ -19,16 +21,33 @@
   import Title from '$lib/components/Title.svelte'
   import Upload from '$lib/components/Upload.svelte'
 
-  const units = ['B', 'KB', 'MB', 'GB', 'TB', '无限制', '禁止']
+  // 单位选项：value 为后端存储值（大小单位字母 或 中文字面量），label 随语言包显示
+  const UNLIMITED_TOKEN = '无限制'
+  const BANNED_TOKEN = '禁止'
+  const units = $derived([
+    { value: 'B', label: 'B' },
+    { value: 'KB', label: 'KB' },
+    { value: 'MB', label: 'MB' },
+    { value: 'GB', label: 'GB' },
+    { value: 'TB', label: 'TB' },
+    { value: UNLIMITED_TOKEN, label: t('settings.unlimited') },
+    { value: BANNED_TOKEN, label: t('settings.banned') },
+  ])
 
-  const themeOptions = [
-    { value: 'system', label: '跟随系统' },
-    { value: 'light', label: '浅色' },
-    { value: 'dark', label: '深色' },
-  ]
+  const themeOptions = $derived([
+    { value: 'system', label: t('settings.followSystem') },
+    { value: 'light', label: t('settings.light') },
+    { value: 'dark', label: t('settings.dark') },
+  ])
+
+  // 语言选项：跟随系统 + 自动扫描的语言包（添加语言包后此处自动出现）
+  const languageOptions = $derived([
+    { value: 'system', label: t('settings.languageSystem') },
+    ...supportedLocales().map((code) => ({ value: code, label: localeDisplayName(code) })),
+  ])
 
   function parseSetting(value: string): { size: string; unit: string } {
-    if (value === '无限制' || value === '禁止') return { size: '', unit: value }
+    if (value === UNLIMITED_TOKEN || value === BANNED_TOKEN) return { size: '', unit: value }
     const match = value.match(/^(\d+)([A-Za-z]+)$/)
     if (match) return { size: match[1], unit: match[2] }
     return { size: '', unit: 'MB' }
@@ -45,6 +64,7 @@
   let siteIcon = $state('')
   let maxFailures = $state('5')
   let lockWindow = $state('900')
+  let defaultLanguage = $state<LanguageMode>('system')
   let saving = $state(false)
 
   let orig = $state({
@@ -56,9 +76,10 @@
     siteIcon: '',
     maxFailures: '5',
     lockWindow: '900',
+    defaultLanguage: 'system' as LanguageMode,
   })
 
-  let hideInput = $derived(unit === '无限制' || unit === '禁止')
+  let hideInput = $derived(unit === UNLIMITED_TOKEN || unit === BANNED_TOKEN)
   let uploadVal = $derived(hideInput ? unit : `${size}${unit}`)
 
   let changed = $derived(
@@ -69,7 +90,8 @@
       loginSiteIcon !== orig.loginSiteIcon ||
       siteIcon !== orig.siteIcon ||
       maxFailures !== orig.maxFailures ||
-      lockWindow !== orig.lockWindow,
+      lockWindow !== orig.lockWindow ||
+      defaultLanguage !== orig.defaultLanguage,
   )
 
   onMount(async () => {
@@ -95,6 +117,8 @@
       maxFailures = mf
       const lw = String(data.login_lock_window_secs || '900')
       lockWindow = lw
+      const dl = String(data.default_language || 'system')
+      defaultLanguage = (dl === 'system' || supportedLocales().includes(dl)) ? dl : 'system'
       orig = {
         uploadLimit: val,
         loginTheme: theme,
@@ -104,6 +128,7 @@
         siteIcon,
         maxFailures: mf,
         lockWindow: lw,
+        defaultLanguage,
       }
     } catch {
       /* 加载失败保持默认值（原版静默处理） */
@@ -113,23 +138,23 @@
   const handleSave = async () => {
     if (!hideInput) {
       if (!size) {
-        message.error('请输入文件大小')
+        message.error(t('settings.errSize'))
         return
       }
       const num = Number(size)
       if (!Number.isInteger(num) || num <= 0) {
-        message.error('请输入正整数')
+        message.error(t('settings.errPositiveInt'))
         return
       }
     }
     const mfNum = Number(maxFailures)
     if (!Number.isInteger(mfNum) || mfNum < 1 || mfNum > 100) {
-      message.error('登录失败次数上限需为 1~100 的整数')
+      message.error(t('settings.errMaxFailures'))
       return
     }
     const lwNum = Number(lockWindow)
     if (!Number.isInteger(lwNum) || lwNum < 1 || lwNum > 86400) {
-      message.error('锁定窗口需为 1~86400 的整数(秒)')
+      message.error(t('settings.errLockWindow'))
       return
     }
     saving = true
@@ -143,12 +168,14 @@
         site_icon: siteIcon,
         login_max_failures: maxFailures,
         login_lock_window_secs: lockWindow,
+        default_language: defaultLanguage,
       })
       const titleChanged =
         siteTitle !== orig.siteTitle ||
         loginSiteTitle !== orig.loginSiteTitle ||
         loginSiteIcon !== orig.loginSiteIcon ||
         siteIcon !== orig.siteIcon
+      const langChanged = defaultLanguage !== orig.defaultLanguage
       orig = {
         uploadLimit: uploadVal,
         loginTheme,
@@ -158,13 +185,18 @@
         siteIcon,
         maxFailures,
         lockWindow,
+        defaultLanguage,
       }
-      message.success('保存成功')
+      message.success(t('common.saved'))
+      // 语言包变更立即生效，无需整页刷新（站点标题变更仍需刷新以更新 document.title）
+      if (langChanged) {
+        setLocale(defaultLanguage)
+      }
       if (titleChanged) {
         setTimeout(() => location.reload(), 800)
       }
     } catch (err) {
-      message.error(getApiError(err, '保存失败'))
+      message.error(getApiError(err, t('common.savedFailed')))
     }
     saving = false
   }
@@ -173,9 +205,9 @@
     try {
       const url = await uploadImage(file)
       loginSiteIcon = url
-      message.success('登录页图标已上传，点击确认保存')
+      message.success(t('settings.loginIconUploaded'))
     } catch (err: unknown) {
-      message.error(getApiError(err, '上传失败'))
+      message.error(getApiError(err, t('settings.uploadFailed')))
     }
   }
 
@@ -183,38 +215,38 @@
     try {
       const url = await uploadImage(file)
       siteIcon = url
-      message.success('登录后图标已上传，点击确认保存')
+      message.success(t('settings.siteIconUploaded'))
     } catch (err: unknown) {
-      message.error(getApiError(err, '上传失败'))
+      message.error(getApiError(err, t('settings.uploadFailed')))
     }
   }
 </script>
 
 <div style="height:100%;overflow:auto">
   {#if !allowed}
-    <Result status="403" title="403" subTitle="抱歉，您没有访问此页面的权限。">
+    <Result status="403" title="403" subTitle={t('common.noAccess')}>
       {#snippet extra()}
-        <Button type="primary" tooltip="返回上一页" onClick={() => window.history.back()}>返回</Button>
+        <Button type="primary" tooltip={t('common.backPrev')} onClick={() => window.history.back()}>{t('common.backPrev')}</Button>
       {/snippet}
     </Result>
   {:else}
-    <Card title="系统设置">
+    <Card title={t('settings.title')}>
       {#snippet extra()}
-        <Tooltip title={changed ? '保存并应用修改后的系统设置' : '没有更改'}>
+        <Tooltip title={changed ? t('settings.saveTooltip') : t('settings.noChange')}>
           <Button type="primary" loading={saving} onClick={handleSave} disabled={!changed} tooltip={undefined}>
-            确认
+            {t('settings.confirm')}
           </Button>
         </Tooltip>
       {/snippet}
       <Form>
         <div style="margin-bottom:24px">
-          <Title level={5}>聊天文件上传大小限制</Title>
+          <Title level={5}>{t('settings.uploadLimit')}</Title>
           <Space>
             {#if !hideInput}
               <Input
                 value={size}
                 onInput={(v) => (size = v)}
-                placeholder="请输入大小"
+                placeholder={t('settings.sizePlaceholder')}
                 style="width:160px"
               />
             {/if}
@@ -222,7 +254,7 @@
               value={unit}
               onChange={(v) => (unit = String(v))}
               width="120px"
-              options={units.map((u) => ({ value: u, label: u }))}
+              options={units}
             />
           </Space>
         </div>
@@ -230,11 +262,11 @@
         <Divider />
   
         <div style="margin-bottom:24px">
-          <Title level={5}>登录页的网站标题</Title>
+          <Title level={5}>{t('settings.loginSiteTitle')}</Title>
           <Input
             value={loginSiteTitle}
             onInput={(v) => (loginSiteTitle = v)}
-            placeholder="例如：企业管理系统"
+            placeholder={t('settings.siteTitlePlaceholder')}
             style="width:300px"
           />
         </div>
@@ -242,7 +274,7 @@
         <Divider />
   
         <div style="margin-bottom:24px">
-          <Title level={5}>登录页的网站图标（仅在浏览器标签页标题旁显示）</Title>
+          <Title level={5}>{t('settings.loginSiteIcon')}</Title>
           <Space>
             <Upload
               accept="image/*"
@@ -251,30 +283,30 @@
                 return false
               }}
             >
-              <Button tooltip="选择图片文件作为登录页图标">上传图标</Button>
+              <Button tooltip={t('settings.uploadLoginIconTooltip')}>{t('settings.uploadIcon')}</Button>
             </Upload>
             {#if loginSiteIcon}
               <img
                 src={`/api/system/icon/login?v=${Date.now()}`}
-                alt="登录页图标"
+                alt={t('settings.loginIconAlt')}
                 style="width:24px;height:24px;object-fit:contain;border:1px solid var(--ant-color-border);border-radius:4px"
               />
-              <Button type="text" tooltip="清除已上传的登录页图标" onClick={() => (loginSiteIcon = '')}>清除</Button>
+              <Button type="text" tooltip={t('settings.clearLoginIconTooltip')} onClick={() => (loginSiteIcon = '')}>{t('settings.clearLoginIcon')}</Button>
             {/if}
           </Space>
           <div style="color:#999;font-size:12px;margin-top:8px">
-            支持 png / jpg / jpeg / gif / webp / bmp / ico，仅用于浏览器标签页标题旁的图标
+            {t('settings.iconFormatHint')}
           </div>
         </div>
   
         <Divider />
   
         <div style="margin-bottom:24px">
-          <Title level={5}>登录后的网站标题</Title>
+          <Title level={5}>{t('settings.siteTitle')}</Title>
           <Input
             value={siteTitle}
             onInput={(v) => (siteTitle = v)}
-            placeholder="例如：企业管理系统"
+            placeholder={t('settings.siteTitlePlaceholder')}
             style="width:300px"
           />
         </div>
@@ -282,7 +314,7 @@
         <Divider />
   
         <div style="margin-bottom:24px">
-          <Title level={5}>登录后的网站图标（仅在浏览器标签页标题旁显示）</Title>
+          <Title level={5}>{t('settings.siteIcon')}</Title>
           <Space>
             <Upload
               accept="image/*"
@@ -291,26 +323,26 @@
                 return false
               }}
             >
-              <Button tooltip="选择图片文件作为登录后的网站图标">上传图标</Button>
+              <Button tooltip={t('settings.uploadSiteIconTooltip')}>{t('settings.uploadIcon')}</Button>
             </Upload>
             {#if siteIcon}
               <img
                 src={`/api/system/icon/site?v=${Date.now()}`}
-                alt="登录后图标"
+                alt={t('settings.siteIconAlt')}
                 style="width:24px;height:24px;object-fit:contain;border:1px solid var(--ant-color-border);border-radius:4px"
               />
-              <Button type="text" tooltip="清除已上传的登录后网站图标" onClick={() => (siteIcon = '')}>清除</Button>
+              <Button type="text" tooltip={t('settings.clearSiteIconTooltip')} onClick={() => (siteIcon = '')}>{t('settings.clearSiteIcon')}</Button>
             {/if}
           </Space>
           <div style="color:#999;font-size:12px;margin-top:8px">
-            支持 png / jpg / jpeg / gif / webp / bmp / ico，仅用于浏览器标签页标题旁的图标
+            {t('settings.iconFormatHint')}
           </div>
         </div>
   
         <Divider />
   
         <div style="margin-bottom:24px">
-          <Title level={5}>登录页面主题</Title>
+          <Title level={5}>{t('settings.loginTheme')}</Title>
           <Radio
             options={themeOptions}
             value={loginTheme}
@@ -321,27 +353,41 @@
         <Divider />
   
         <div style="margin-bottom:24px">
-          <Title level={5}>登录安全限制</Title>
+          <Title level={5}>{t('settings.defaultLanguage')}</Title>
+          <Radio
+            options={languageOptions}
+            value={defaultLanguage}
+            onChange={(v) => (defaultLanguage = String(v) as LanguageMode)}
+          />
+          <div style="color:#999;font-size:12px;margin-top:8px">
+            {t('settings.defaultLanguageHint')}
+          </div>
+        </div>
+  
+        <Divider />
+  
+        <div style="margin-bottom:24px">
+          <Title level={5}>{t('settings.loginSecurity')}</Title>
           <div style="display:flex;flex-direction:column;gap:12px">
             <div style="display:flex;align-items:center;gap:12px">
-              <span style="width:140px;flex-shrink:0">失败次数上限</span>
+              <span style="width:140px;flex-shrink:0">{t('settings.maxFailures')}</span>
               <Input
                 value={maxFailures}
                 onInput={(v) => (maxFailures = v)}
                 placeholder="1~100"
                 style="width:120px;flex-shrink:0"
               />
-              <span style="color:#999">次（同一 IP 或用户名在窗口内失败达上限即锁定）</span>
+              <span style="color:#999">{t('settings.maxFailuresHint')}</span>
             </div>
             <div style="display:flex;align-items:center;gap:12px">
-              <span style="width:140px;flex-shrink:0">锁定窗口</span>
+              <span style="width:140px;flex-shrink:0">{t('settings.lockWindow')}</span>
               <Input
                 value={lockWindow}
                 onInput={(v) => (lockWindow = v)}
                 placeholder="1~86400"
                 style="width:120px;flex-shrink:0"
               />
-              <span style="color:#999">秒（保存后立即生效，无需重启）</span>
+              <span style="color:#999">{t('settings.lockWindowHint')}</span>
             </div>
           </div>
         </div>
