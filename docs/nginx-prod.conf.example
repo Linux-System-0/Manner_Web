@@ -1,35 +1,3 @@
-# Manner_Web - 可以在 Linux 系统上运行的企业管理系统
-# Copyright (C) 2026 Linux-System-0(Github) / 一架在Linux上起飞的A320(Bilibili) <ls0_1@qq.com>
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
-# Manner_Web 生产反向代理配置样例（Nginx）
-#
-# 部署形态：HTTPS 同源部署 —— Nginx 托管 SPA 静态资源（前端 dist），
-# /api 与 /uploads 反代到后端 127.0.0.1:8080（后端仅本机监听）。
-# 同源部署下 Cookie SameSite=Strict 正常工作，前端 connect-src 'self' 即可。
-#
-# 使用前提：
-#   1. 替换 <your-domain> 为实际域名；
-#   2. 证书路径替换为实际 SSL 证书；
-#   3. 后端以 COOKIE_SECURE=true 启动（HTTPS 下登录 Cookie 才带 Secure 标志）；
-#   4. 前端 build 产物放置于 /var/www/manner/dist（SvelteKit adapter-static 输出，
-#      以 index.html 作为 SPA 入口）。
-#
-# 放置于 /etc/nginx/conf.d/manner-web.conf 后执行:
-#   nginx -t && systemctl reload nginx
-
 server {
     listen 80;
     server_name <your-domain>;
