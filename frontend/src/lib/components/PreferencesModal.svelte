@@ -18,10 +18,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 <script lang="ts">
   // 个人设置弹窗（复刻原 React PreferencesModal.tsx）
-  // 主题 / 新建会话位置 / 时区；确认时写入 preferencesStore
+  // 主题 / 语言（个人覆盖系统默认）/ 新建会话位置 / 时区；确认时写入 preferencesStore
   import { t } from '$lib/i18n'
+  import { setLocale } from '$lib/i18n'
+  import { supportedLocales, localeDisplayName, resolveLocale } from '$lib/i18n'
+  import { i18nState } from '$lib/i18n'
   import Modal from './Modal.svelte'
   import Radio from './Radio.svelte'
+  import Select from './Select.svelte'
   import Input from './Input.svelte'
   import Button from './Button.svelte'
   import Space from './Space.svelte'
@@ -39,6 +43,24 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
   let newConvPos = $state<'first' | 'last'>($preferencesStore.newConvPosition)
   let tzMode = $state<'system' | 'manual'>($preferencesStore.timezoneMode)
   let offsetStr = $state(String($preferencesStore.timezoneOffset))
+  let languageVal = $state($preferencesStore.language || 'system')
+
+  // 「跟随系统」标签动态显示当前解析结果（如：跟随系统（简体中文）），
+  // 便于确认浏览器语言被识别成了什么。
+  let followSystemLabel = $derived.by(() => {
+    const resolved = resolveLocale('system')
+    const name = localeDisplayName(resolved)
+    return resolved === 'en-US' && !supportedLocales().includes('en-US')
+      ? t('i18n.followSystem')
+      : `${t('i18n.followSystem')}（${name}）`
+  })
+
+  let languageOptions = $derived([
+    { value: 'system', label: followSystemLabel },
+    ...supportedLocales()
+      .filter((l) => l !== 'system')
+      .map((l) => ({ value: l, label: localeDisplayName(l) })),
+  ])
 
   function getSystemTzLabel(): string {
     const offsetMin = new Date().getTimezoneOffset()
@@ -73,6 +95,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
       preferencesStore.updateTimezoneOffset(Number(trimmed))
     }
     preferencesStore.updateNewConvPosition(newConvPos)
+    // 个人语言：写入偏好并立即生效（仅本账号，覆盖系统默认语言）。
+    preferencesStore.updateLanguage(languageVal)
+    setLocale(languageVal as 'system' | 'en-US' | 'zh-CN')
     onClose?.()
   }
 
@@ -85,7 +110,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
   }
 </script>
 
-<Modal open={open} title={t('preferences.title')} width={480} onclose={onClose} onOk={handleOk} okText={t('preferences.confirm')}>
+<Modal open={open} title={t('preferences.title')} width={520} onclose={onClose} onOk={handleOk} okText={t('preferences.confirm')}>
   <div style="margin-bottom:24px">
     <Title level={5}>{t('preferences.theme')}</Title>
     <Radio
@@ -97,6 +122,19 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
       value={themeVal}
       onChange={(v) => (themeVal = String(v) as 'light' | 'dark' | 'system')}
     />
+  </div>
+
+  <div style="margin-bottom:24px">
+    <Title level={5}>{t('preferences.language')}</Title>
+    <Select
+      value={languageVal}
+      options={languageOptions}
+      width="100%"
+      onChange={(v) => (languageVal = String(v || 'system'))}
+    />
+    <Text type="secondary" style="font-size:12px;margin-top:4px;display:block">
+      {t('preferences.languageHint')}
+    </Text>
   </div>
 
   <div style="margin-bottom:24px">

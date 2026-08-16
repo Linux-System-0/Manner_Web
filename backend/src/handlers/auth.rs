@@ -497,6 +497,14 @@ pub async fn update_preferences(
             ("newConvPosition", serde_json::Value::String(s)) => {
                 s == "first" || s == "last"
             }
+            // 个人语言设置：system（跟随系统/浏览器）或合法语言代码（如 en-US / zh-CN）。
+            // 仅覆盖该员工本人，不影响系统 default_language（全局默认）。
+            ("language", serde_json::Value::String(s)) => {
+                s == "system"
+                    || (s.len() >= 2
+                        && s.len() <= 35
+                        && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+            }
             _ => false,
         };
         if ok {

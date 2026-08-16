@@ -1,8 +1,8 @@
 # Manner_Web
 
-> 内部企业管理系统：员工管理 + 角色权限（RBAC + 数据范围 + 部门角色继承） + 组织架构（部门树） + 站内聊天 + 系统设置。
+> 内部企业管理系统：员工管理 + 角色权限（RBAC + 数据范围 + 部门角色继承） + 组织架构（部门树） + 站内聊天 + 任务管理 + 财务模块（报销/发票/收付款/预算/报表） + 系统设置。
 
-Manner_Web 是面向企业内部的 Web 管理系统，将员工管理、权限控制、组织架构、站内聊天与系统设置整合到同一平台。采用前后端分离架构：后端为 Rust（axum）REST API，前端为 SvelteKit 5 构建的纯 SPA 静态站点。权限采用 **RBAC + 数据范围 + 部门角色继承** 模型：权限经角色授予（员工直接分配 + 部门绑定 + 父子角色继承），并支持数据范围（全部/本部门及子部门/本部门/仅本人/指定部门）。
+Manner_Web 是面向企业内部的 Web 管理系统，将员工管理、权限控制、组织架构、站内聊天、财务核算与系统设置整合到同一平台。采用前后端分离架构：后端为 Rust（axum）REST API，前端为 SvelteKit 5 构建的纯 SPA 静态站点。权限采用 **RBAC + 数据范围 + 部门角色继承** 模型：权限经角色授予（员工直接分配 + 部门绑定 + 父子角色继承），并支持数据范围（全部/本部门及子部门/本部门/仅本人/指定部门）。财务模块内置报销审批流（提交 → 部门审批 → 财务复核 → 付款，全程留痕）、发票查重、收付款流水、部门预算与超支预警、财务报表汇总/排行/趋势/CSV 导出。任务模块与财务相互独立：员工创建/完成个人任务，管理员可查看全员任务情况，首页仪表盘同时展示任务与财务卡片。界面语言支持系统默认（系统设置）+ 个人覆盖（个人设置，仅对当前账号生效）。
 
 ## 技术栈
 
@@ -10,7 +10,7 @@ Manner_Web 是面向企业内部的 Web 管理系统，将员工管理、权限�
 | --- | --- | --- |
 | 后端 | Rust（axum 0.7 + sqlx 0.8） | REST API；bcrypt 密码哈希、JWT（HS256）双令牌认证；员工敏感字段 AES-256-GCM 静态加密；MySQL 异步访问（运行时 SQL） |
 | 前端 | SvelteKit 5 + Svelte 5 + Vite 8 + TypeScript 5 | 纯 SPA（adapter-static，`ssr=false`）；UI 组件全部自研（40+ 个），无 React/antd 运行时依赖；内置 i18n（中/英） |
-| 数据库 | MySQL 8 | utf8mb4 / InnoDB；16 张表；`backend/sql/init.sql` 启动时幂等执行建表 |
+| 数据库 | MySQL 8 | utf8mb4 / InnoDB；22 张表；`backend/sql/init.sql` 启动时幂等执行建表 |
 | 部署 | Nginx + 后端二进制 + MySQL | 静态产物托管 + `/api`、`/uploads` 反向代理；运行期无需 Node.js |
 
 ## 目录结构
@@ -24,7 +24,7 @@ Manner_Web/
 │   ├── logs/         #   运行日志目录（运行期生成，不入库）
 │   └── .env.example  #   环境变量模板（复制为 .env 使用）
 ├── frontend/         # SvelteKit 5 前端
-│   ├── src/routes/   #   页面路由（login / chat / employees / departments / roles / logs / profile / settings 等）
+│   ├── src/routes/   #   页面路由（login / chat / tasks / employees / departments / roles / logs / profile / settings / finance/* 等）
 │   ├── src/lib/      #   api / stores / i18n / components / types / icons / styles
 │   ├── svelte.config.js  # adapter-static（fallback index.html）
 │   └── vite.config.ts    # 开发代理 /api、/uploads → 后端

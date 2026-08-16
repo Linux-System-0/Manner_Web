@@ -90,7 +90,7 @@
 
 ---
 
-## 二、权限码表（18 个）
+## 二、权限码表（29 个）
 
 权限经**角色授权**派生（RBAC + 数据范围 + 部门角色继承，见 [权限系统设计.md](./权限系统设计.md)），员工级直接授权已移除。access 令牌内嵌授权快照（`permissions` + `grants` + `perm_version`），权限变更后 `perm_version` 失配即由中间件重算，**即时生效**。
 
@@ -114,15 +114,27 @@
 | chat | chat:group_create | 群聊创建 | POST /api/chat/conversations |
 | system | system:settings | 系统设置 | GET /api/system/health、GET/PUT /api/system/settings、GET /api/system/logs |
 | system | system:config | 系统配置 | 种子保留码，当前无端点校验 |
+| finance | finance:reimburse_view | 查看报销单 | GET /api/finance/reimbursements、GET /api/finance/reimbursements/:id（数据范围过滤） |
+| finance | finance:reimburse_create | 提交报销 | POST /api/finance/reimbursements、PUT/DELETE /api/finance/reimbursements/:id（本人）、POST /api/finance/reimbursements/:id/withdraw |
+| finance | finance:reimburse_approve | 审批报销 | POST /api/finance/reimbursements/:id/approve（数据范围过滤） |
+| finance | finance:reimburse_manage | 财务复核/付款 | POST /api/finance/reimbursements/:id/review、POST /api/finance/reimbursements/:id/pay、财务侧编辑/删除/撤回 |
+| finance | finance:invoice_manage | 发票管理 | GET/POST /api/finance/invoices、PUT/DELETE /api/finance/invoices/:id |
+| finance | finance:payment_manage | 收付款管理 | GET/POST /api/finance/payments、PUT/DELETE /api/finance/payments/:id |
+| finance | finance:budget_manage | 预算管理 | GET/POST /api/finance/budgets、PUT/DELETE /api/finance/budgets/:id |
+| finance | finance:report_view | 财务报表 | GET /api/finance/reports/*（汇总/排行/趋势/导出） |
+| task | task:create | 创建任务 | POST /api/tasks |
+| task | task:view_all | 查看全员任务 | GET /api/tasks、GET /api/tasks/stats（无该码仅见本人任务） |
+| task | task:manage | 管理任务 | PUT/DELETE /api/tasks/:id（无该码仅可维护本人任务） |
 
 说明：
 
 - `system:config` 为种子预留码，当前**没有端点校验**，保留以备后续功能。
+- 报销单数据范围：`finance:reimburse_view` / `finance:reimburse_approve` 为数据型权限，范围作用于**提交时的部门快照**（提交人无部门时拒绝提交）；本人提交的单始终对本人可见。
 - 首个管理员：系统初始时（`registration_open=1` 且员工表为空）经 `POST /api/auth/register` 注册，注册成功即绑定内置 `super_admin` 角色（全量权限、all 范围），并关闭注册通道（`registration_open` 置 `0`）。
 
 ---
 
-## 三、路由总表（55 个 + /uploads 静态）
+## 三、路由总表（82 个 + /uploads 静态）
 
 ### 匿名（7 个）
 
@@ -136,7 +148,7 @@
 | 6 | GET | /api/system/login-page | 匿名 | system::get_login_page_settings |
 | 7 | GET | /api/system/icon/:key | 匿名 | system::get_site_icon |
 
-### 受保护（48 个）
+### 受保护（75 个）
 
 | # | 方法 | 路径 | 权限 | Handler |
 | --- | --- | --- | --- | --- |
@@ -188,6 +200,37 @@
 | 53 | GET | /api/chat/blocked | 登录 | chat::list_blocked |
 | 54 | GET | /api/chat/employees | 登录（employee:view 持有者按数据范围过滤） | chat::list_employees_for_chat |
 | 55 | GET | /api/chat/file/:name | 登录 + 相关会话成员 | chat::get_chat_file |
+| 56 | GET | /api/finance/reimbursements | finance:reimburse_view/approve/manage（数据范围） | finance::list_reimbursements |
+| 57 | POST | /api/finance/reimbursements | finance:reimburse_create | finance::create_reimbursement |
+| 58 | GET | /api/finance/reimbursements/:id | finance:reimburse_view/approve/manage（数据范围） | finance::get_reimbursement |
+| 59 | PUT | /api/finance/reimbursements/:id | 本人（reimburse_create）或财务（reimburse_manage） | finance::update_reimbursement |
+| 60 | DELETE | /api/finance/reimbursements/:id | 本人（驳回/撤回）或财务（reimburse_manage） | finance::delete_reimbursement |
+| 61 | POST | /api/finance/reimbursements/:id/approve | finance:reimburse_approve（数据范围） | finance::approve_reimbursement |
+| 62 | POST | /api/finance/reimbursements/:id/review | finance:reimburse_manage | finance::review_reimbursement |
+| 63 | POST | /api/finance/reimbursements/:id/pay | finance:reimburse_manage | finance::pay_reimbursement |
+| 64 | POST | /api/finance/reimbursements/:id/withdraw | 本人（reimburse_create）或财务 | finance::withdraw_reimbursement |
+| 65 | GET | /api/finance/invoices | finance:invoice_manage | finance::list_invoices |
+| 66 | POST | /api/finance/invoices | finance:invoice_manage | finance::create_invoice |
+| 67 | PUT | /api/finance/invoices/:id | finance:invoice_manage | finance::update_invoice |
+| 68 | DELETE | /api/finance/invoices/:id | finance:invoice_manage | finance::delete_invoice |
+| 69 | GET | /api/finance/payments | finance:payment_manage | finance::list_payments |
+| 70 | POST | /api/finance/payments | finance:payment_manage | finance::create_payment |
+| 71 | PUT | /api/finance/payments/:id | finance:payment_manage | finance::update_payment |
+| 72 | DELETE | /api/finance/payments/:id | finance:payment_manage | finance::delete_payment |
+| 73 | GET | /api/finance/budgets | finance:budget_manage | finance::list_budgets |
+| 74 | POST | /api/finance/budgets | finance:budget_manage | finance::create_budget |
+| 75 | PUT | /api/finance/budgets/:id | finance:budget_manage | finance::update_budget |
+| 76 | DELETE | /api/finance/budgets/:id | finance:budget_manage | finance::delete_budget |
+| 77 | GET | /api/finance/reports/summary | finance:report_view | finance::report_summary |
+| 78 | GET | /api/finance/reports/departments | finance:report_view | finance::report_departments |
+| 79 | GET | /api/finance/reports/trend | finance:report_view | finance::report_trend |
+| 80 | GET | /api/finance/reports/export/reimbursements | finance:report_view | finance::export_reimbursements |
+| 81 | GET | /api/finance/reports/export/payments | finance:report_view | finance::export_payments |
+| 82 | GET | /api/tasks | task:view_all（无则仅本人任务） | task::list_tasks |
+| 83 | POST | /api/tasks | task:create | task::create_task |
+| 84 | GET | /api/tasks/stats | task:view_all（无则本人统计） | task::task_stats |
+| 85 | PUT | /api/tasks/:id | 本人（创建者/负责人）或 task:manage | task::update_task |
+| 86 | DELETE | /api/tasks/:id | 本人（创建者/负责人）或 task:manage | task::delete_task |
 
 ### 静态资源
 
@@ -921,6 +964,218 @@
 - 图片类仍做魔数校验（同上）。
 - 保存至 `UPLOAD_DIR/chat/` 子目录；成功 `data` 为 `/uploads/chat/{uuid}.{ext}`。
 - 受 `chat_upload_limit` 与 100MB 硬限制约束（同上）。
+
+### 4.7 财务模块（finance）
+
+财务模块权限码（module = `finance`）见第二节。报销单状态机：
+
+```
+pending_leader（待部门审批）→ pending_finance（待财务复核）→ approved（已通过）→ paid（已付款）
+                                   ↘ rejected（任一环节驳回）        ↘ withdrawn（提交人撤回）
+```
+
+- 提交人在 `pending_leader / rejected / withdrawn` 状态可编辑；驳回/撤回后编辑即**重新提交**回 `pending_leader`。
+- 数据范围：`finance:reimburse_view` / `finance:reimburse_approve` 按报销单**提交时部门快照**过滤（本人提交的单恒可见）。
+- 金额列 `DECIMAL(12,2)`，接口统一以浮点数传递；非法金额返回 `40005`。
+
+#### POST /api/finance/reimbursements
+
+权限：`finance:reimburse_create`。创建并提交报销单。
+
+请求体：
+
+```json
+{
+  "title": "出差差旅费",
+  "category": "travel",
+  "amount": 1200.50,
+  "reason": "上海出差",
+  "invoice_ids": ["发票id1"]
+}
+```
+
+- `category` 常见取值：travel / office / meal / transport / other（自由字符串亦可）。
+- `invoice_ids`：可选；发票须存在且未被其他报销单关联，否则 `40000`。
+- 提交人须已加入部门（部门快照），否则 `40000`「请先加入部门后再提交报销申请」。
+- 成功 `data: { id }`。
+
+#### GET /api/finance/reimbursements
+
+权限：`finance:reimburse_view` / `approve` / `manage`（数据范围过滤；`manage` 全量）。
+
+查询参数：`page`、`page_size`（默认 10，上限 100）、`status`、`keyword`（事由/提交人）、`department_id`。
+
+响应 `data.items[]` 字段：`id, employee_id, employee_name, department_id, department_name, title, category, amount, currency, status, approver_id/name, approve_comment, finance_reviewer_id/name, finance_comment, paid_at, created_at`。
+
+#### GET /api/finance/reimbursements/:id
+
+权限同列表（数据范围过滤）。返回完整详情：基础字段 + `reason, approved_at, finance_reviewed_at, invoices[]（发票列表）, logs[]（审批流水）`。
+
+#### PUT /api/finance/reimbursements/:id
+
+- 提交人：`reimburse_create` 且为本人、状态为 `pending_leader / rejected / withdrawn`；驳回/撤回后编辑自动重新提交。
+- 财务：`reimburse_manage`，任意非 `paid` 状态。
+- 请求体字段均可选：`title, category, amount, reason, invoice_ids`（整体替换关联发票）。
+- 已付款单不可编辑（`40000`）。
+
+#### DELETE /api/finance/reimbursements/:id
+
+- 提交人：删除自己的 `rejected / withdrawn` 单。
+- 财务：`reimburse_manage` 删除任意非 `paid` 单。
+- 删除后关联发票自动回到 `unused` 状态。
+
+#### POST /api/finance/reimbursements/:id/approve
+
+权限：`finance:reimburse_approve`（数据范围覆盖提交部门）。仅 `pending_leader` 状态。
+
+```json
+{ "action": "approve" | "reject", "comment": "可选；驳回必填" }
+```
+
+- 通过 → `pending_finance`；驳回 → `rejected`。不得审批/复核自己提交的单。
+
+#### POST /api/finance/reimbursements/:id/review
+
+权限：`finance:reimburse_manage`。仅 `pending_finance` 状态。请求体同 approve。
+
+- 通过 → `approved`；驳回 → `rejected`。
+
+#### POST /api/finance/reimbursements/:id/pay
+
+权限：`finance:reimburse_manage`。仅 `approved` 状态。标记 `paid` 并**自动生成一条支出记录**（`direction=expense`、`category=报销`、`reimbursement_id` 关联、往来方=提交人）。
+
+#### POST /api/finance/reimbursements/:id/withdraw
+
+提交人（`reimburse_create`）或财务可操作，仅 `pending_leader / pending_finance` 状态 → `withdrawn`。
+
+#### GET /api/finance/invoices
+
+权限：`finance:invoice_manage`。参数：`page, page_size, keyword`（号码/开票方）、`status`（`unused` / `claimed`）。
+
+#### POST /api/finance/invoices
+
+权限：`finance:invoice_manage`。录入发票，**发票号码唯一查重**（重复返回 `40000`「发票号码已存在」）。
+
+```json
+{
+  "invoice_code": "110024113301",
+  "invoice_type": "普通发票",
+  "amount": 1200.50,
+  "tax_amount": 138.90,
+  "issued_at": "2025-06-01",
+  "issuer_name": "开票公司",
+  "buyer_name": "可选",
+  "image_url": "可选 /uploads 路径"
+}
+```
+
+#### PUT /api/finance/invoices/:id
+
+已关联（`claimed`）发票不可修改（`40000`）。号码变更同样查重。
+
+#### DELETE /api/finance/invoices/:id
+
+仅 `unused` 发票可删除。
+
+#### GET /api/finance/payments
+
+权限：`finance:payment_manage`。参数：`page, page_size, direction, keyword, department_id, from, to`（`occurred_at` 日期范围）。
+
+#### POST /api/finance/payments
+
+权限：`finance:payment_manage`。新增收付款记录。
+
+```json
+{
+  "direction": "income" | "expense",
+  "category": "销售收入",
+  "amount": 5000,
+  "counterparty": "某客户",
+  "occurred_at": "2025-06-15",
+  "department_id": "可选",
+  "remark": "可选"
+}
+```
+
+#### PUT /api/finance/payments/:id · DELETE /api/finance/payments/:id
+
+权限：`finance:payment_manage`。报销付款自动生成的记录（`reimbursement_id` 非空）建议只读，不做强制限制。
+
+#### GET /api/finance/budgets
+
+权限：`finance:budget_manage`。参数：`page, page_size, period_type（year|month）, period_value, department_id`。
+
+响应 `data.items[]` 附加聚合字段：`spent`（已用 = 已通过/已付款报销 + 非报销关联的支出付款，同期间同部门）、`remaining`（额度 - 已用）；`spent > amount` 即超支（前端红色预警）。
+
+#### POST /api/finance/budgets
+
+权限：`finance:budget_manage`。同一部门+期间唯一，重复返回 `40000`。
+
+```json
+{ "department_id": "...", "period_type": "month", "period_value": "2025-06", "amount": 10000 }
+```
+
+`period_value`：年 `YYYY`（如 `2025`），月 `YYYY-MM`（如 `2025-06`）。
+
+#### PUT /api/finance/budgets/:id · DELETE /api/finance/budgets/:id
+
+权限：`finance:budget_manage`。更新/删除预算。
+
+#### GET /api/finance/reports/summary
+
+权限：`finance:report_view`。参数：`from, to`（`occurred_at`/`created_at` 日期范围）。
+
+响应：`income, expense, net, income_count, expense_count, reimbursement_pending（待付报销金额）, reimbursement_pending_count`。
+
+#### GET /api/finance/reports/departments
+
+权限：`finance:report_view`。参数：`from, to`。部门费用排行（支出付款 + 已通过/已付款报销），按支出降序；`total_expense` 为合计。
+
+#### GET /api/finance/reports/trend
+
+权限：`finance:report_view`。参数：`from, to, granularity（month 默认 | year）`。按月/年聚合收付款趋势。
+
+#### GET /api/finance/reports/export/reimbursements · /export/payments
+
+权限：`finance:report_view`。参数：`from, to`。返回 `text/csv`（UTF-8 BOM + CRLF，Excel 直接打开），`Content-Disposition: attachment`。
+
+### 4.8 任务模块（task）
+
+任务与财务**相互独立**（仅共享 employees 基础表）：员工创建/完成个人任务，持有 `task:view_all` 的管理员可查看全员任务情况（统计与列表均含全员维度）。权限码见第二节。
+
+- 可见范围：无 `task:view_all` 时仅见「本人创建或本人负责」的任务；有则可通过 `scope=all|mine` 与 `assignee_id` 过滤。
+- 可维护范围：任务的创建者或负责人可编辑/删除/标记状态；`task:manage` 可操作任意任务。
+
+#### GET /api/tasks
+
+权限：`task:view_all`（无则仅本人任务）。参数：`page, page_size, status（todo|done）, assignee_id, scope（all|mine）`。
+
+响应 `data.items[]`：`id, title, description, assignee_id/name, creator_id/name, status, due_date, completed_at, created_at`；`data.can_view_all` 表明是否全员视图。
+
+#### POST /api/tasks
+
+权限：`task:create`。创建任务。
+
+```json
+{
+  "title": "完成季度报表",
+  "description": "可选",
+  "assignee_id": "可选，负责人（默认本人）",
+  "due_date": "可选，YYYY-MM-DD"
+}
+```
+
+#### GET /api/tasks/stats
+
+权限：`task:view_all`（无则本人统计）。响应：`total, todo, done, overdue（逾期未完成）, can_view_all`。供仪表盘任务卡片与任务页统计使用。
+
+#### PUT /api/tasks/:id
+
+创建者/负责人（或 `task:manage`）可更新。字段均可选：`title, description, assignee_id, due_date, status（todo|done）`。传 `status` 即标记完成/未完成（完成记录 `completed_at`，取消完成则清除）。
+
+#### DELETE /api/tasks/:id
+
+创建者/负责人（或 `task:manage`）可删除。
 
 ---
 

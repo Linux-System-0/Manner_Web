@@ -106,7 +106,19 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     goto('/login', { replaceState: true })
   }
 
-  let selectedKey = $derived('/' + $page.url.pathname.split('/').filter(Boolean)[0])
+  // 菜单高亮：优先匹配「菜单项 key 是当前路径前缀」的最长项（支持多级路径，
+  // 如 /finance/reimbursements → 高亮 /finance/reimbursements），否则取首段。
+  let selectedKey = $derived.by(() => {
+    const path = $page.url.pathname
+    const keys = menuItems.map((m) => m.key)
+    let best = ''
+    for (const key of keys) {
+      if (path === key || path.startsWith(key + '/')) {
+        if (key.length > best.length) best = key
+      }
+    }
+    return best || '/' + path.split('/').filter(Boolean)[0]
+  })
 
   let menuItems = $derived([
     { key: '/', label: t('menu.dashboard'), icon: 'dashboard' },
@@ -120,6 +132,28 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
       ? [{ key: '/roles', label: t('menu.roles'), icon: 'lock' }]
       : []),
     { key: '/chat', label: t('menu.chat'), icon: 'message' },
+    // 任务模块（task:*，与财务独立）
+    ...(authStore.hasPermission('task:create') || authStore.hasPermission('task:view_all')
+      ? [{ key: '/tasks', label: t('menu.tasks'), icon: 'check' }]
+      : []),
+    // 财务模块（finance:*）
+    ...(authStore.hasPermission('finance:reimburse_view') ||
+    authStore.hasPermission('finance:reimburse_approve') ||
+    authStore.hasPermission('finance:reimburse_manage')
+      ? [{ key: '/finance/reimbursements', label: t('menu.financeReimburse'), icon: 'profile' }]
+      : []),
+    ...(authStore.hasPermission('finance:invoice_manage')
+      ? [{ key: '/finance/invoices', label: t('menu.financeInvoices'), icon: 'account-book' }]
+      : []),
+    ...(authStore.hasPermission('finance:payment_manage')
+      ? [{ key: '/finance/payments', label: t('menu.financePayments'), icon: 'swap' }]
+      : []),
+    ...(authStore.hasPermission('finance:budget_manage')
+      ? [{ key: '/finance/budgets', label: t('menu.financeBudgets'), icon: 'wallet' }]
+      : []),
+    ...(authStore.hasPermission('finance:report_view')
+      ? [{ key: '/finance/reports', label: t('menu.financeReports'), icon: 'bar-chart' }]
+      : []),
     ...(authStore.hasPermission('system:settings')
       ? [{ key: '/logs', label: t('menu.logs'), icon: 'file-text' }]
       : []),

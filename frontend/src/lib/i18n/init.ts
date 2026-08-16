@@ -14,30 +14,46 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-// i18n 初始化：从公开的登录页配置接口读取 default_language 并应用。
+// i18n 初始化：语言优先级 = 个人设置（preferences.language）> 系统默认（default_language）> 跟随系统。
 // 登录页与受保护页共用（登录页不经 Layout 包裹，故在此集中处理）。
 import { setLocale, type LanguageMode } from './index'
 import { getLoginPage } from '@/api/system'
+import { getGlobalPrefs, defaultPrefs } from '@/stores/preferences'
 
 let initialized = false
 let applying = false
 
 /**
- * 应用默认语言：
- * - 若后台已配置 default_language，则按其解析（system=跟随系统，具体语言代码=手动）；
- * - 未配置时回退为「跟随系统」。
+ * 应用语言：
+ * - 个人设置 preferences.language 优先（仅针对该员工本人，覆盖系统默认）；
+ * - 否则取系统默认 default_language（system=跟随系统，具体语言代码=手动）；
+ * - 均未配置时回退「跟随系统」。
+ *
+ * 登录前（登录页）：本地可能有历史个人偏好；登录后 preferencesStore.refresh()
+ * 会拉取该用户服务端偏好，此时再次调用 initI18n(true) 以个人设置为准。
  */
 export async function initI18n(force = false): Promise<void> {
   if (initialized && !force) return
   if (applying) return
   applying = true
   try {
-    const res = await getLoginPage()
-    const mode = (res.data?.default_language as LanguageMode | undefined) || 'system'
+    // 个人偏好（本地已加载的最新值）。
+    const prefs = getGlobalPrefs()
+    let mode: LanguageMode =
+      prefs && prefs.language ? (prefs.language as LanguageMode) : (defaultPrefs.language as LanguageMode)
+
+    if (mode === 'system') {
+      // 未设个人语言 → 系统默认。
+      const res = await getLoginPage()
+      mode = (res.data?.default_language as LanguageMode | undefined) || 'system'
+    }
     setLocale(mode)
     initialized = true
   } catch {
-    setLocale('system')
+    const prefs = getGlobalPrefs()
+    const mode: LanguageMode =
+      prefs && prefs.language ? (prefs.language as LanguageMode) : 'system'
+    setLocale(mode)
     initialized = true
   } finally {
     applying = false

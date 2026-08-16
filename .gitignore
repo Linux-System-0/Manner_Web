@@ -18,6 +18,13 @@
 *id_rsa*
 *id_ed25519*
 
+# 本地缓存与遗留测试脚本（不提交）
+.npm-cache/
+frontend/repro*.cjs
+
 .license-header.tpl
 
 uploads/
+
+# 本地 SSH 净化配置（不入库）
+.git-safe/

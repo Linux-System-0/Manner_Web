@@ -38,7 +38,15 @@ pub struct Grant {
 
 /// 数据型权限码：受数据范围过滤。
 pub fn is_data_scoped_code(code: &str) -> bool {
-    matches!(code, "employee:list" | "employee:view" | "employee:view_sensitive")
+    matches!(
+        code,
+        "employee:list"
+            | "employee:view"
+            | "employee:view_sensitive"
+            // 财务：报销单按「提交时部门快照」做数据范围过滤（审批同范围）。
+            | "finance:reimburse_view"
+            | "finance:reimburse_approve"
+    )
 }
 
 /// 员工是否持有指定权限码（任意来源）。

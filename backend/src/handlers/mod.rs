@@ -18,8 +18,10 @@ pub mod auth;
 pub mod chat;
 pub mod department;
 pub mod employee;
+pub mod finance;
 pub mod role;
 pub mod system;
+pub mod task;
 
 use axum::Router;
 use axum::body::Body;
@@ -194,6 +196,39 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/chat/blocked", get(chat::list_blocked))
         .route("/api/chat/employees", get(chat::list_employees_for_chat))
         .route("/api/chat/file/:name", get(chat::get_chat_file))
+        // ---- 财务模块（finance:*）----
+        .route("/api/finance/reimbursements", get(finance::list_reimbursements))
+        .route("/api/finance/reimbursements", post(finance::create_reimbursement))
+        .route("/api/finance/reimbursements/:id", get(finance::get_reimbursement))
+        .route("/api/finance/reimbursements/:id", put(finance::update_reimbursement))
+        .route("/api/finance/reimbursements/:id", delete(finance::delete_reimbursement))
+        .route("/api/finance/reimbursements/:id/approve", post(finance::approve_reimbursement))
+        .route("/api/finance/reimbursements/:id/review", post(finance::review_reimbursement))
+        .route("/api/finance/reimbursements/:id/pay", post(finance::pay_reimbursement))
+        .route("/api/finance/reimbursements/:id/withdraw", post(finance::withdraw_reimbursement))
+        .route("/api/finance/invoices", get(finance::list_invoices))
+        .route("/api/finance/invoices", post(finance::create_invoice))
+        .route("/api/finance/invoices/:id", put(finance::update_invoice))
+        .route("/api/finance/invoices/:id", delete(finance::delete_invoice))
+        .route("/api/finance/payments", get(finance::list_payments))
+        .route("/api/finance/payments", post(finance::create_payment))
+        .route("/api/finance/payments/:id", put(finance::update_payment))
+        .route("/api/finance/payments/:id", delete(finance::delete_payment))
+        .route("/api/finance/budgets", get(finance::list_budgets))
+        .route("/api/finance/budgets", post(finance::create_budget))
+        .route("/api/finance/budgets/:id", put(finance::update_budget))
+        .route("/api/finance/budgets/:id", delete(finance::delete_budget))
+        .route("/api/finance/reports/summary", get(finance::report_summary))
+        .route("/api/finance/reports/departments", get(finance::report_departments))
+        .route("/api/finance/reports/trend", get(finance::report_trend))
+        .route("/api/finance/reports/export/reimbursements", get(finance::export_reimbursements))
+        .route("/api/finance/reports/export/payments", get(finance::export_payments))
+        // ---- 任务模块（task:*，与财务独立）----
+        .route("/api/tasks", get(task::list_tasks))
+        .route("/api/tasks", post(task::create_task))
+        .route("/api/tasks/stats", get(task::task_stats))
+        .route("/api/tasks/:id", put(task::update_task))
+        .route("/api/tasks/:id", delete(task::delete_task))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             crate::middleware::auth::auth_middleware,

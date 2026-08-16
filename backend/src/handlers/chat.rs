@@ -159,6 +159,48 @@ fn count_admins(participants: &[ParticipantInfo]) -> usize {
     participants.iter().filter(|p| p.role.as_deref() == Some("admin")).count()
 }
 
+/// F-26: 聊天文件 `file_url` 严格格式校验。
+///
+/// 仅接受本站上传接口产物 `/uploads/<uuid>.<ext>` 或 `/uploads/chat/<uuid>.<ext>`：
+/// - 文件名为服务端生成的 UUID（36 字符，字母数字 + 连字符）；
+/// - 扩展名为可上传白名单（任意 ASCII 字母数字，≤16 字符）；
+/// - 禁止 `..`、`/`、`\`、前导点等路径混淆字符。
+///
+/// 此前仅做「前缀 + 扩展名」校验，攻击者可提交 `/uploads/../backend/.env` 这类
+/// 指向服务器任意文件的 file_url（存在性校验可放行、消息可入库），构成脏数据写入
+/// 与文件存在性探测面（读取侧由 tower-http ServeDir 的 `..` 拒绝 + get_chat_file
+/// 文件名白名单双重兜底，此处在写入侧彻底封堵）。
+fn is_valid_chat_file_url(url: &str) -> bool {
+    let name = url
+        .strip_prefix("/uploads/chat/")
+        .or_else(|| url.strip_prefix("/uploads/"))
+        .unwrap_or("");
+    if name.is_empty()
+        || name.len() > 64
+        || name.starts_with('.')
+        || name.contains("..")
+        || name.contains('/')
+        || name.contains('\\')
+        || !name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
+    {
+        return false;
+    }
+    let Some(ext) = std::path::Path::new(name)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+    else {
+        return false;
+    };
+    if !crate::handlers::system::is_uploadable_extension(&ext) {
+        return false;
+    }
+    let stem = name.strip_suffix(&format!(".{ext}")).unwrap_or(name);
+    stem.len() == 36 && stem.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+}
+
 pub async fn list_conversations(
     State(state): State<AppState>,
     auth: AuthUser,
@@ -552,17 +594,10 @@ pub async fn send_message(
         return Err(AppError::BadRequest("文件消息必须携带文件链接".to_string()));
     }
     if let Some(ref url) = body.file_url {
-        let is_local_upload = url.starts_with("/uploads/")
-            && {
-                let name = url.trim_start_matches("/uploads/");
-                let ext = std::path::Path::new(name)
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .map(|e| e.to_ascii_lowercase())
-                    .unwrap_or_default();
-                crate::handlers::system::is_uploadable_extension(&ext)
-            };
-        if !is_local_upload {
+        // F-26: 严格格式校验（UUID 文件名 + 扩展名白名单，拒绝 .. / 分隔符混入），
+        // 防止用户可控任意链接（钓鱼跳转、javascript: 伪协议等）与路径穿越串
+        // （/uploads/../backend/.env 指向服务器任意文件）通过文件消息传播。
+        if !is_valid_chat_file_url(url) {
             return Err(AppError::BadRequest(
                 "文件链接必须指向本站上传的文件".to_string(),
             ));

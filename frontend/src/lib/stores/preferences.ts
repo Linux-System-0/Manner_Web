@@ -32,6 +32,8 @@ export interface Preferences {
   timezoneMode: TimezoneMode
   timezoneOffset: number
   newConvPosition: NewConvPosition
+  /** 个人语言设置：system（跟随系统/浏览器）或语言代码（如 en-US / zh-CN）；覆盖系统默认 default_language */
+  language: string
 }
 
 const STORAGE_KEY = 'manner-preferences'
@@ -41,6 +43,7 @@ export const defaultPrefs: Preferences = {
   timezoneMode: 'system',
   timezoneOffset: 0,
   newConvPosition: 'last',
+  language: 'system',
 }
 
 function loadLocal(): Preferences {
@@ -141,6 +144,8 @@ function normalizePrefs(data: Record<string, unknown> | undefined | null): Prefe
     timezoneMode: (data.timezoneMode as TimezoneMode) || 'system',
     timezoneOffset: typeof data.timezoneOffset === 'number' ? data.timezoneOffset : 0,
     newConvPosition: data.newConvPosition === 'first' ? 'first' : 'last',
+    // 个人语言：缺失/非法回退 system（跟随系统/浏览器）。
+    language: typeof data.language === 'string' ? data.language : 'system',
   }
 }
 
@@ -155,6 +160,7 @@ function createPreferencesStore() {
         timezoneMode: p.timezoneMode,
         timezoneOffset: p.timezoneOffset,
         newConvPosition: p.newConvPosition,
+        language: p.language,
       },
     }).catch(() => {})
   }
@@ -204,6 +210,7 @@ function createPreferencesStore() {
     updateTimezoneMode: (timezoneMode: TimezoneMode) => update({ timezoneMode }),
     updateTimezoneOffset: (timezoneOffset: number) => update({ timezoneOffset }),
     updateNewConvPosition: (newConvPosition: NewConvPosition) => update({ newConvPosition }),
+    updateLanguage: (language: string) => update({ language }),
   }
 }
 

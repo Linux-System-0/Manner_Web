@@ -54,6 +54,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         // 身份已切换（同浏览器被另一账号覆盖）：更新本地登录态与偏好
         authStore.setUser(res.data)
         await preferencesStore.refresh()
+        // 个人语言随账号切换：以新账号的服务端偏好为准重新应用。
+        await initI18n(true)
       } else if (lastUserId === null) {
         authStore.setUser(res.data)
       }

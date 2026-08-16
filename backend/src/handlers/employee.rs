@@ -359,9 +359,9 @@ pub async fn view_sensitive_field(
         &format!(
             "[Sensitive info] User {} viewed {} of employee {} (id={})",
             user_tag(&auth.name, &auth.username),
+            label,
             user_tag(&row.name, &row.username),
-            row.id,
-            label
+            row.id
         ),
         &ip,
     );

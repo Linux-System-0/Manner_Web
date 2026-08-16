@@ -127,6 +127,17 @@ pub async fn health(
     }))))
 }
 
+/// F-26: 字节数人类可读格式化（B/KB/MB），用于上传上限提示文案。
+fn fmt_bytes(n: usize) -> String {
+    if n >= 1024 * 1024 {
+        format!("{}MB", n / (1024 * 1024))
+    } else if n >= 1024 {
+        format!("{}KB", n / 1024)
+    } else {
+        format!("{}B", n)
+    }
+}
+
 fn parse_size_limit(value: &str) -> Option<usize> {
     if value == "禁止" {
         return Some(0);
@@ -183,7 +194,32 @@ async fn save_upload(
     .await
     .map_err(|e| AppError::Internal(anyhow::anyhow!("Failed to read settings: {}", e)))?;
 
-    let max_bytes = limit.as_deref().and_then(parse_size_limit);
+    // F-26: 大小上限双保险。
+    // - 管理员配置（chat_upload_limit：禁止 / 数字+单位 / 无限制）语义不变，优先取较小值；
+    // - 硬性上限兜底：头像等图片（/api/upload，无权限门槛、任何登录用户可调）一律
+    //   ≤10MB（远高于正常头像体积，杜绝单文件无限写入磁盘耗尽）；
+    //   聊天文件在管理员未配置或设为「无限制」时以 100MB（DefaultBodyLimit 上限）封顶。
+    let admin_limit = limit.as_deref().and_then(parse_size_limit);
+    const IMAGE_HARD_CAP: usize = 10 * 1024 * 1024;
+    const CHAT_HARD_CAP: usize = 100 * 1024 * 1024;
+    let max_bytes = if image_only {
+        admin_limit
+            .map(|l| l.min(IMAGE_HARD_CAP))
+            .or(Some(IMAGE_HARD_CAP))
+    } else {
+        admin_limit
+            .map(|l| l.min(CHAT_HARD_CAP))
+            .or(Some(CHAT_HARD_CAP))
+    };
+
+    // F-26: 错误/日志提示展示「实际生效」的上限（管理员配置更小则展示配置，否则展示硬性上限），
+    // 避免「无限制」设置下被硬上限拦截时提示与实际不符。
+    let limit_display = match (admin_limit, max_bytes) {
+        (Some(a), Some(m)) if a <= m => fmt_bytes(a),
+        (Some(a), None) => fmt_bytes(a),
+        (_, Some(m)) => fmt_bytes(m),
+        (None, None) => "无限制".to_string(),
+    };
 
     if max_bytes == Some(0) {
         append_log(&state.config.log_file, &format!("User {} upload failed: uploads disabled by administrator", user_tag(&auth.name, &auth.username)), ip);
@@ -248,7 +284,6 @@ async fn save_upload(
 
         if let Some(max) = max_bytes {
             if data.len() > max {
-                let limit_display = limit.clone().unwrap_or_else(|| max.to_string());
                 append_log(&state.config.log_file, &format!("User {} upload of {} failed: file size exceeds limit ({})", user_tag(&auth.name, &auth.username), file_name, limit_display), ip);
                 return Err(AppError::BadRequest(format!(
                     "文件大小超过限制 ({})", limit_display
@@ -543,7 +578,8 @@ pub async fn logs(
     require_permission(&auth.permissions, "system:settings")?;
 
     let log_path = std::path::Path::new(&state.config.log_file);
-    let max_lines = query.lines.unwrap_or(200);
+    // F-26: lines 加上限（最多 5000 行），防止超大取值把整份日志读入内存（资源耗尽）。
+    let max_lines = query.lines.unwrap_or(200).min(5000);
 
     if !log_path.exists() {
         return Ok(Json(ApiResponse::ok(serde_json::json!({
@@ -609,6 +645,8 @@ pub async fn list_permissions(
                 "system" => "系统设置".to_string(),
                 "chat" => "聊天".to_string(),
                 "role" => "角色管理".to_string(),
+                "finance" => "财务管理".to_string(),
+                "task" => "任务管理".to_string(),
                 _ => perm.module.clone(),
             };
         }

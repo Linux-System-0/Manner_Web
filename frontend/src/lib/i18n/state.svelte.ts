@@ -64,22 +64,34 @@ export function localeDisplayName(code: Locale): string {
 
 /**
  * 从浏览器/系统语言解析目标语言代码：
- * 1) 精确匹配（navigator.language 与某语言包代码一致）；
- * 2) 语言前缀匹配（如 navigator.language=zh-TW 时匹配 zh-CN 语言包）；
+ * 1) 遍历 navigator.languages（用户完整语言偏好列表，含 navigator.language 兜底）逐个精确匹配；
+ * 2) 语言前缀匹配（如 zh-TW 匹配 zh-CN 语言包）；
  * 3) 均无匹配则回退到兜底语言 en-US。
+ *
+ * 注意：不能只看 navigator.language——Chrome 等浏览器即使界面显示中文，
+ * navigator.language 也可能返回 en-US（界面语言与内容语言偏好分离），
+ * 必须按用户偏好列表逐一尝试。
  */
 export function resolveLocale(mode: LanguageMode): Locale {
   if (mode !== 'system') {
     return SUPPORTED_LOCALES.includes(mode) ? mode : 'en-US'
   }
   if (typeof navigator === 'undefined') return 'en-US'
-  const nav = (navigator.language || '').toLowerCase()
-  if (!nav) return 'en-US'
-  const exact = SUPPORTED_LOCALES.find((l) => l.toLowerCase() === nav)
-  if (exact) return exact
-  const base = nav.split('-')[0]
-  const byPrefix = SUPPORTED_LOCALES.find((l) => l.toLowerCase().startsWith(base))
-  return byPrefix || 'en-US'
+  // navigator.languages 可能缺失（老浏览器），此时回退 navigator.language。
+  const langs: string[] =
+    (typeof navigator.languages !== 'undefined' && navigator.languages.length > 0
+      ? navigator.languages
+      : [navigator.language])
+        .filter(Boolean)
+  for (const lang of langs) {
+    const nav = lang.toLowerCase()
+    const exact = SUPPORTED_LOCALES.find((l) => l.toLowerCase() === nav)
+    if (exact) return exact
+    const base = nav.split('-')[0]
+    const byPrefix = SUPPORTED_LOCALES.find((l) => l.toLowerCase().startsWith(base))
+    if (byPrefix) return byPrefix
+  }
+  return 'en-US'
 }
 
 /** 应用语言模式：写入响应式状态 + html[lang] */

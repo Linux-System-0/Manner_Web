@@ -19,11 +19,16 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 <script lang="ts">
   // 仪表盘：复刻原 React src/pages/Dashboard.tsx
   // - 欢迎信息
+  // - 任务卡片（task:create/view_all 权限；本人待办/已完成/逾期，管理员为全员统计）
+  // - 财务卡片（finance:report_view 权限；本月收入/支出/待付报销）
   // - 系统运行状态（system:settings 权限，健康检查 /system/health）
   // - 个人信息（Descriptions 视觉）
   import { onMount } from 'svelte'
+  import { goto } from '$app/navigation'
   import { authStore } from '$lib/stores/auth'
-  import { client } from '$lib/api/client'
+  import { client, getApiError } from '$lib/api/client'
+  import { getTaskStats } from '$lib/api/tasks'
+  import { getReportSummary } from '$lib/api/finance'
   import { t } from '$lib/i18n'
   import Card from '$lib/components/Card.svelte'
   import Row from '$lib/components/Row.svelte'
@@ -32,6 +37,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
   import Text from '$lib/components/Text.svelte'
   import Spin from '$lib/components/Spin.svelte'
   import Tag from '$lib/components/Tag.svelte'
+  import Button from '$lib/components/Button.svelte'
+  import { message } from '$lib/components/message'
 
   interface SystemHealth {
     server: string
@@ -39,9 +46,40 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     version: string
   }
 
+  interface TaskStatsData {
+    total: number
+    todo: number
+    done: number
+    overdue: number
+    can_view_all: boolean
+  }
+
+  interface FinanceSummaryData {
+    income: number
+    expense: number
+    net: number
+    income_count: number
+    expense_count: number
+    reimbursement_pending: number
+    reimbursement_pending_count: number
+  }
+
   let health = $state<SystemHealth | null>(null)
   let healthLoading = $state(false)
   let canSettings = $derived($authStore.permissions.includes('system:settings'))
+  let canTasks = $derived(
+    $authStore.permissions.includes('task:create') ||
+      $authStore.permissions.includes('task:view_all'),
+  )
+  let canFinance = $derived($authStore.permissions.includes('finance:report_view'))
+
+  let taskStats = $state<TaskStatsData | null>(null)
+  let financeSummary = $state<FinanceSummaryData | null>(null)
+
+  // 本月日期范围
+  const now = new Date()
+  const monthFrom = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
+  const monthTo = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()}`
 
   // 官方 antd outlined 图标 path（与 icon-data.ts 同源 @ant-design/icons-svg@4.5.0，
   // icon-data 未收录 cloud-server/check-circle/close-circle，故页面内嵌）
@@ -58,7 +96,25 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     'M512 64c247.4 0 448 200.6 448 448S759.4 960 512 960 64 759.4 64 512 264.6 64 512 64zm0 76c-205.4 0-372 166.6-372 372s166.6 372 372 372 372-166.6 372-372-166.6-372-372-372zm128.01 198.83c.03 0 .05.01.09.06l45.02 45.01a.2.2 0 01.05.09.12.12 0 010 .07c0 .02-.01.04-.05.08L557.25 512l127.87 127.86a.27.27 0 01.05.06v.02a.12.12 0 010 .07c0 .03-.01.05-.05.09l-45.02 45.02a.2.2 0 01-.09.05.12.12 0 01-.07 0c-.02 0-.04-.01-.08-.05L512 557.25 384.14 685.12c-.04.04-.06.05-.08.05a.12.12 0 01-.07 0c-.03 0-.05-.01-.09-.05l-45.02-45.02a.2.2 0 01-.05-.09.12.12 0 010-.07c0-.02.01-.04.06-.08L466.75 512 338.88 384.14a.27.27 0 01-.05-.06l-.01-.02a.12.12 0 010-.07c0-.03.01-.05.05-.09l45.02-45.02a.2.2 0 01.09-.05.12.12 0 01.07 0c.02 0 .04.01.08.06L512 466.75l127.86-127.86c.04-.05.06-.06.08-.06a.12.12 0 01.07 0z',
   ]
 
+  function fmtMoney(v: number): string {
+    return `¥${(v || 0).toFixed(2)}`
+  }
+
   onMount(() => {
+    if (canTasks) {
+      getTaskStats()
+        .then((res) => {
+          if (res.code === 0 && res.data) taskStats = res.data
+        })
+        .catch(() => {})
+    }
+    if (canFinance) {
+      getReportSummary({ from: monthFrom, to: monthTo })
+        .then((res) => {
+          if (res.code === 0 && res.data) financeSummary = res.data
+        })
+        .catch(() => {})
+    }
     if (canSettings) {
       healthLoading = true
       client
@@ -88,6 +144,79 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
   <Title level={4} style="margin-bottom:24px">
     {t('dashboard.welcome', { name: $authStore.user?.name || $authStore.user?.username || '' })}
   </Title>
+
+  <Row gutter={16} style="margin-bottom:24px">
+    {#if canTasks}
+      <Col span={12}>
+        <Card title={t('dashboard.taskCard')}>
+          {#if taskStats}
+            <Row gutter={16}>
+              <Col span={8}>
+                <div class="dash-stat" style="color:var(--ant-color-warning)">
+                  <div class="dash-stat-value">{taskStats.todo}</div>
+                  <div class="dash-stat-label">{t('dashboard.taskTodo')}</div>
+                </div>
+              </Col>
+              <Col span={8}>
+                <div class="dash-stat" style="color:var(--ant-color-success)">
+                  <div class="dash-stat-value">{taskStats.done}</div>
+                  <div class="dash-stat-label">{t('dashboard.taskDone')}</div>
+                </div>
+              </Col>
+              <Col span={8}>
+                <div class="dash-stat" style="color:{taskStats.overdue > 0 ? 'var(--ant-color-error)' : 'var(--ant-color-text)'}">
+                  <div class="dash-stat-value">{taskStats.overdue}</div>
+                  <div class="dash-stat-label">{t('dashboard.taskOverdue')}</div>
+                </div>
+              </Col>
+            </Row>
+            <div style="text-align:right;margin-top:12px">
+              <Button type="link" size="small" onClick={() => goto('/tasks')}>
+                {t('dashboard.taskGo')} →
+              </Button>
+            </div>
+          {:else}
+            <Spin />
+          {/if}
+        </Card>
+      </Col>
+    {/if}
+    {#if canFinance}
+      <Col span={12}>
+        <Card title={t('dashboard.financeCard')}>
+          {#if financeSummary}
+            <Row gutter={16}>
+              <Col span={8}>
+                <div class="dash-stat" style="color:var(--ant-color-success)">
+                  <div class="dash-stat-value">+{fmtMoney(financeSummary.income)}</div>
+                  <div class="dash-stat-label">{t('dashboard.financeIncome')}</div>
+                </div>
+              </Col>
+              <Col span={8}>
+                <div class="dash-stat" style="color:var(--ant-color-error)">
+                  <div class="dash-stat-value">-{fmtMoney(financeSummary.expense)}</div>
+                  <div class="dash-stat-label">{t('dashboard.financeExpense')}</div>
+                </div>
+              </Col>
+              <Col span={8}>
+                <div class="dash-stat" style="color:var(--ant-color-warning)">
+                  <div class="dash-stat-value">{fmtMoney(financeSummary.reimbursement_pending)}</div>
+                  <div class="dash-stat-label">{t('dashboard.financePending')}</div>
+                </div>
+              </Col>
+            </Row>
+            <div style="text-align:right;margin-top:12px">
+              <Button type="link" size="small" onClick={() => goto('/finance/reports')}>
+                {t('dashboard.financeGo')} →
+              </Button>
+            </div>
+          {:else}
+            <Spin />
+          {/if}
+        </Card>
+      </Col>
+    {/if}
+  </Row>
 
   {#if canSettings}
     <Card title={t('dashboard.systemStatus')} style="margin-bottom:24px">
@@ -180,5 +309,19 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     font-size: 14px;
     line-height: 1.5715;
     vertical-align: top;
+  }
+  .dash-stat {
+    text-align: center;
+    padding: 8px 0;
+  }
+  .dash-stat-value {
+    font-size: 24px;
+    font-weight: 600;
+    line-height: 1.2;
+  }
+  .dash-stat-label {
+    font-size: 13px;
+    color: var(--ant-color-text-secondary);
+    margin-top: 4px;
   }
 </style>

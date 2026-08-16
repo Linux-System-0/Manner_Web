@@ -257,6 +257,161 @@ CREATE TABLE IF NOT EXISTS role_department_scopes (
     FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ============================================================================
+-- 财务模块：报销管理 + 收付款记录 + 预算管理 + 发票管理 + 财务报表
+-- 权限码（module = finance）：
+--   finance:reimburse_view    查看报销单（数据范围过滤）
+--   finance:reimburse_create  提交报销
+--   finance:reimburse_approve 审批报销（部门负责人级，数据范围过滤）
+--   finance:reimburse_manage  报销单财务复核/付款/删除（财务）
+--   finance:invoice_manage    发票管理（录入/查重/关联）
+--   finance:payment_manage    收付款记录管理
+--   finance:budget_manage     预算管理（按部门/期间设置额度，超支预警）
+--   finance:report_view       财务报表（汇总/排行/趋势/导出）
+-- ============================================================================
+
+INSERT IGNORE INTO permissions (code, name, module) VALUES
+('finance:reimburse_view',    '查看报销单',   'finance'),
+('finance:reimburse_create',  '提交报销',     'finance'),
+('finance:reimburse_approve', '审批报销',     'finance'),
+('finance:reimburse_manage',  '财务复核/付款', 'finance'),
+('finance:invoice_manage',    '发票管理',     'finance'),
+('finance:payment_manage',    '收付款管理',   'finance'),
+('finance:budget_manage',     '预算管理',     'finance'),
+('finance:report_view',       '财务报表',     'finance');
+
+-- 报销单：提交 → 部门负责人审批 → 财务复核 → 付款，全程留痕（reimbursement_logs）。
+CREATE TABLE IF NOT EXISTS reimbursements (
+    id CHAR(36) NOT NULL PRIMARY KEY,
+    employee_id CHAR(36) NOT NULL COMMENT '提交人',
+    department_id CHAR(36) NOT NULL COMMENT '提交时所在部门（快照，审批按此部门数据范围过滤）',
+    title VARCHAR(128) NOT NULL COMMENT '事由标题',
+    category VARCHAR(32) NOT NULL COMMENT '费用类型：travel|office|meal|transport|other 等',
+    amount DECIMAL(12,2) NOT NULL COMMENT '金额（正数）',
+    currency VARCHAR(8) NOT NULL DEFAULT 'CNY',
+    reason TEXT COMMENT '详细说明',
+    status VARCHAR(16) NOT NULL DEFAULT 'pending_leader'
+        COMMENT 'pending_leader 待部门审批|pending_finance 待财务复核|approved 已通过|rejected 已驳回|withdrawn 已撤回|paid 已付款',
+    approver_id CHAR(36) DEFAULT NULL COMMENT '部门审批人',
+    approve_comment VARCHAR(255) DEFAULT NULL,
+    approved_at DATETIME DEFAULT NULL,
+    finance_reviewer_id CHAR(36) DEFAULT NULL COMMENT '财务复核人',
+    finance_comment VARCHAR(255) DEFAULT NULL,
+    finance_reviewed_at DATETIME DEFAULT NULL,
+    paid_at DATETIME DEFAULT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_status (status),
+    INDEX idx_employee (employee_id),
+    INDEX idx_department (department_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 报销审批/状态流水（全程留痕）。
+CREATE TABLE IF NOT EXISTS reimbursement_logs (
+    id CHAR(36) NOT NULL PRIMARY KEY,
+    reimbursement_id CHAR(36) NOT NULL,
+    action VARCHAR(32) NOT NULL COMMENT 'submit|approve|reject|review|pay|withdraw|edit',
+    actor_id CHAR(36) NOT NULL,
+    comment VARCHAR(255) DEFAULT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_reimbursement (reimbursement_id),
+    FOREIGN KEY (reimbursement_id) REFERENCES reimbursements(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 发票：发票号码唯一（查重），可关联到报销单（多对多）。
+CREATE TABLE IF NOT EXISTS invoices (
+    id CHAR(36) NOT NULL PRIMARY KEY,
+    invoice_code VARCHAR(64) NOT NULL UNIQUE COMMENT '发票号码（唯一，查重）',
+    invoice_type VARCHAR(32) NOT NULL DEFAULT '普通发票' COMMENT '增值税专用发票|普通发票|电子发票 等',
+    amount DECIMAL(12,2) NOT NULL COMMENT '价税合计金额',
+    tax_amount DECIMAL(12,2) DEFAULT NULL COMMENT '税额',
+    issued_at DATE DEFAULT NULL COMMENT '开票日期',
+    issuer_name VARCHAR(128) NOT NULL COMMENT '开票方/销售方名称',
+    buyer_name VARCHAR(128) DEFAULT NULL COMMENT '购买方抬头',
+    image_url VARCHAR(512) DEFAULT NULL COMMENT '发票图片（/uploads 下）',
+    employee_id CHAR(36) NOT NULL COMMENT '录入人',
+    status VARCHAR(16) NOT NULL DEFAULT 'unused' COMMENT 'unused 未关联|claimed 已关联报销单',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_status (status),
+    INDEX idx_employee (employee_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 报销单-发票 多对多关联。
+CREATE TABLE IF NOT EXISTS reimbursement_invoices (
+    reimbursement_id CHAR(36) NOT NULL,
+    invoice_id CHAR(36) NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (reimbursement_id, invoice_id),
+    FOREIGN KEY (reimbursement_id) REFERENCES reimbursements(id) ON DELETE CASCADE,
+    FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 收付款记录：收入/支出流水，报销付款时自动生成一条关联记录。
+CREATE TABLE IF NOT EXISTS payments (
+    id CHAR(36) NOT NULL PRIMARY KEY,
+    direction VARCHAR(8) NOT NULL COMMENT 'income 收款|expense 付款',
+    category VARCHAR(32) NOT NULL COMMENT '收支类别',
+    amount DECIMAL(12,2) NOT NULL COMMENT '金额（正数）',
+    counterparty VARCHAR(128) DEFAULT NULL COMMENT '往来方/对方单位',
+    occurred_at DATE NOT NULL COMMENT '业务日期',
+    department_id CHAR(36) DEFAULT NULL COMMENT '归属部门（可空）',
+    remark VARCHAR(255) DEFAULT NULL,
+    reimbursement_id CHAR(36) DEFAULT NULL COMMENT '关联报销单（报销付款自动生成时非空）',
+    created_by CHAR(36) NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_direction (direction),
+    INDEX idx_occurred (occurred_at),
+    INDEX idx_department (department_id),
+    INDEX idx_reimbursement (reimbursement_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 预算：按部门 × 期间（年/月）设置额度；已用额由「已通过/已付款报销」+
+-- 「非报销关联的支出付款」实时聚合，超支在前端与接口双重预警。
+CREATE TABLE IF NOT EXISTS budgets (
+    id CHAR(36) NOT NULL PRIMARY KEY,
+    department_id CHAR(36) NOT NULL,
+    period_type VARCHAR(8) NOT NULL COMMENT 'year|month',
+    period_value VARCHAR(16) NOT NULL COMMENT '年：2025；月：2025-06',
+    amount DECIMAL(12,2) NOT NULL COMMENT '预算额度',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_budget (department_id, period_type, period_value),
+    INDEX idx_period (period_type, period_value),
+    FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================================
+-- 任务模块：独立于财务（任务归任务，财务归财务），员工创建/完成个人任务，
+-- 持有 task:view_all 的管理员可查看全员任务情况。
+-- 权限码（module = task）：
+--   task:create     创建任务
+--   task:view_all   查看全员任务（无该码仅见本人任务）
+--   task:manage     编辑/删除任意任务（无该码仅可维护本人任务）
+-- ============================================================================
+
+INSERT IGNORE INTO permissions (code, name, module) VALUES
+('task:create',   '创建任务',   'task'),
+('task:view_all', '查看全员任务', 'task'),
+('task:manage',   '管理任务',   'task');
+
+CREATE TABLE IF NOT EXISTS tasks (
+    id CHAR(36) NOT NULL PRIMARY KEY,
+    title VARCHAR(128) NOT NULL COMMENT '任务标题',
+    description VARCHAR(512) DEFAULT NULL COMMENT '任务说明',
+    assignee_id CHAR(36) NOT NULL COMMENT '负责人（执行人）',
+    creator_id CHAR(36) NOT NULL COMMENT '创建人',
+    status VARCHAR(16) NOT NULL DEFAULT 'todo' COMMENT 'todo 未完成|done 已完成',
+    due_date DATE DEFAULT NULL COMMENT '截止日期',
+    completed_at DATETIME DEFAULT NULL COMMENT '完成时间',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_assignee (assignee_id),
+    INDEX idx_creator (creator_id),
+    INDEX idx_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- 种子：super_admin 内置角色（全权限、all 数据范围，固定 id），首个管理员注册时绑定。
 -- is_system=1：不可删除/改名/改权限/改范围；员工角色分配中不允许通过部门角色绑定。
 INSERT IGNORE INTO roles (id, name, is_system, scope_type, description)

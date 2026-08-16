@@ -273,3 +273,135 @@ export interface LogsData {
   total: number
   file: string
 }
+
+// ---- 财务模块 ----
+
+/** 报销单状态 */
+export type ReimbursementStatus =
+  | 'pending_leader'
+  | 'pending_finance'
+  | 'approved'
+  | 'rejected'
+  | 'withdrawn'
+  | 'paid'
+
+export interface Reimbursement {
+  id: string
+  employee_id: string
+  employee_name: string
+  department_id: string
+  department_name: string
+  title: string
+  category: string
+  amount: number
+  currency: string
+  status: ReimbursementStatus
+  approver_id: string | null
+  approver_name: string | null
+  approve_comment: string | null
+  finance_reviewer_id: string | null
+  finance_reviewer_name: string | null
+  finance_comment: string | null
+  paid_at: string | null
+  created_at: string
+}
+
+export interface ReimbursementLog {
+  id: string
+  action: string
+  actor_id: string
+  actor_name: string
+  comment: string | null
+  created_at: string
+}
+
+export interface ReimbursementDetail extends Reimbursement {
+  reason: string | null
+  approved_at: string | null
+  finance_reviewed_at: string | null
+  invoices: Invoice[]
+  logs: ReimbursementLog[]
+}
+
+export interface Invoice {
+  id: string
+  invoice_code: string
+  invoice_type: string
+  amount: number
+  tax_amount: number | null
+  issued_at: string | null
+  issuer_name: string
+  buyer_name: string | null
+  image_url: string | null
+  employee_id: string
+  employee_name: string
+  status: 'unused' | 'claimed'
+  created_at: string
+}
+
+export interface Payment {
+  id: string
+  direction: 'income' | 'expense'
+  category: string
+  amount: number
+  counterparty: string | null
+  occurred_at: string
+  department_id: string | null
+  department_name: string | null
+  remark: string | null
+  reimbursement_id: string | null
+  created_by: string
+  creator_name: string
+  created_at: string
+}
+
+export interface Budget {
+  id: string
+  department_id: string
+  department_name: string
+  period_type: 'year' | 'month'
+  period_value: string
+  amount: number
+  spent: number
+  remaining: number
+  created_at: string
+}
+
+export interface ReportSummary {
+  income: number
+  expense: number
+  net: number
+  income_count: number
+  expense_count: number
+  reimbursement_pending: number
+  reimbursement_pending_count: number
+}
+
+export interface DepartmentReportRow {
+  department_id: string
+  department_name: string
+  expense: number
+}
+
+export interface TrendRow {
+  period: string
+  income: number
+  expense: number
+}
+
+// ---- 任务模块（与财务独立）----
+
+export interface Task {
+  id: string
+  title: string
+  description: string | null
+  assignee_id: string
+  assignee_name: string
+  creator_id: string
+  creator_name: string
+  /** todo 未完成 | done 已完成 */
+  status: 'todo' | 'done'
+  due_date: string | null
+  completed_at: string | null
+  created_at: string
+}
